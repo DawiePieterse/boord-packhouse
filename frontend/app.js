@@ -156,10 +156,8 @@ async function runBackupNow() {
 // --------------------------------------------------------------------------
 const SETTINGS_PAGES = [
   { id: "packhouse", name: "Packhouse", icon: "fa-sliders" },
-  { id: "tents",     name: "Tents",     icon: "fa-tent",       load: loadTentSettings },
-  { id: "sulfur",    name: "Sulfur",    icon: "fa-calculator", load: loadSulfurSettings },
-  { id: "backup",    name: "Backup",    icon: "fa-database",   load: loadBackupsList },
-  { id: "pin",       name: "PIN",       icon: "fa-key" },
+  { id: "sulfur",    name: "Sulfur",    icon: "fa-tent",       load: () => { loadTentSettings(); loadSulfurSettings(); } },
+  { id: "setup",     name: "Setup",     icon: "fa-screwdriver-wrench", load: loadBackupsList },
 ];
 
 function renderSettingsNav() {
