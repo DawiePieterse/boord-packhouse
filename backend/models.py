@@ -109,3 +109,82 @@ class SulfurSettings(SQLModel, table=True):
     residue_calibrated: bool = False
     residue_limit_ppm: float = 10.0   # EU limit for SO2 in the aril
     residue_warn_ppm: float = 8.0
+
+
+class Bath(SQLModel, table=True):
+    """An acid bath, set up in Settings -> Acid. Retired, never deleted, so
+    past batches keep resolving to it. change_days and change_crates are
+    when the screen says the chemicals are due (the SOP: at least two
+    changes a week)."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    default_dip_minutes: int = 5
+    default_dry_minutes: int = 30
+    default_crates: int = 24
+    change_days: float = 3.5
+    change_crates: int = 500
+    sort: int = 0
+    active: bool = True
+
+
+class AcidBatch(SQLModel, table=True):
+    """Crates through an acid bath: dipped, then dried, then done.
+
+    Made on the tablet like a SulfurRun, with the same idempotent sync:
+    dip_ended_at and ended_at are each set once and never undone. Export
+    fruit comes from a sulfur run (sulfur_run_uuid, its block or supplier
+    copied in); local fruit comes straight from grading and has none. Not a
+    foreign key: the sulfur run may still be on another tablet's outbox.
+    """
+    uuid: str = Field(primary_key=True)
+    bath_id: int = Field(foreign_key="bath.id")
+    bath_name: str = ""
+    route: str = "export"           # export | local
+    sulfur_run_uuid: Optional[str] = None
+    crates: int
+    dip_minutes: int
+    dry_minutes: int
+    block_id: Optional[str] = None
+    block_name: str = ""
+    variety: str = ""
+    supplier_id: Optional[int] = None
+    supplier_name: str = ""
+    started_at: datetime
+    started_by: str = ""
+    started_by_name: str = ""
+    dip_ended_at: Optional[datetime] = None
+    dip_ended_by: str = ""
+    dip_ended_by_name: str = ""
+    ended_at: Optional[datetime] = None
+    ended_by: str = ""
+    ended_by_name: str = ""
+    device: str = ""
+    synced_at: Optional[datetime] = None
+
+
+class ChemicalChange(SQLModel, table=True):
+    """The chemicals in a bath were changed. Bath health counts days and
+    crates from the latest one."""
+    uuid: str = Field(primary_key=True)
+    bath_id: int = Field(foreign_key="bath.id")
+    bath_name: str = ""
+    changed_at: datetime
+    crates_since: int = 0           # crates through the bath since the change before
+    by: str = ""
+    by_name: str = ""
+    device: str = ""
+    synced_at: Optional[datetime] = None
+
+
+class BathCheck(SQLModel, table=True):
+    """A concentration reading taken at a bath."""
+    uuid: str = Field(primary_key=True)
+    bath_id: int = Field(foreign_key="bath.id")
+    bath_name: str = ""
+    checked_at: datetime
+    value: float
+    note: str = ""
+    by: str = ""
+    by_name: str = ""
+    device: str = ""
+    synced_at: Optional[datetime] = None

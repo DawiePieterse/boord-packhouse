@@ -5,8 +5,8 @@
 // hash (#sulfur, #settings/backup), so the browser's own back button works
 // too.
 //
-// Sulfur tent is built (sulfur.js, with its offline sync in sync.js); the
-// other roles are placeholders until their stage of Boord_Packhouse_App_Plan.md.
+// Sulfur tent (sulfur.js) and Acid bath (acid.js) are built, with their
+// offline sync in sync.js; the other roles are placeholders until their stage of Boord_Packhouse_App_Plan.md.
 
 const $ = (id) => document.getElementById(id);
 const esc = (v) => Boord.escapeHtml(v);
@@ -14,7 +14,7 @@ const esc = (v) => Boord.escapeHtml(v);
 // The plan's home-screen order.
 const MODULES = [
   { id: "sulfur",   name: "Sulfur tent",         icon: "fa-tent",                     blurb: "Load a run, dose, countdown and overrun alarm.", built: true },
-  { id: "acid",     name: "Acid bath",           icon: "fa-flask",                    blurb: "Batches, dip and drying timers, chemical changes." },
+  { id: "acid",     name: "Acid bath",           icon: "fa-flask",                    blurb: "Batches, dip and drying timers, chemical changes.", built: true },
   { id: "prepack",  name: "Pre-pack",            icon: "fa-box-open",                 blurb: "Punnets into cartons onto pre-pack pallets." },
   { id: "lines",    name: "Lines",               icon: "fa-arrows-split-up-and-left", blurb: "Grading split by route, cartons and pallets." },
   { id: "coldstore", name: "Cold store & PPECB", icon: "fa-snowflake",                blurb: "Pallets in and out, PPECB inspections." },
@@ -157,6 +157,7 @@ async function runBackupNow() {
 const SETTINGS_PAGES = [
   { id: "packhouse", name: "Packhouse", icon: "fa-sliders" },
   { id: "sulfur",    name: "Sulfur",    icon: "fa-tent",       load: () => { loadTentSettings(); loadSulfurSettings(); } },
+  { id: "acid",      name: "Acid",      icon: "fa-flask",      load: loadBathSettings },
   { id: "setup",     name: "Setup",     icon: "fa-screwdriver-wrench", load: loadBackupsList },
 ];
 
@@ -178,11 +179,12 @@ function show() {
   const m = MODULES.find((x) => `#${x.id}` === hash);
   // Off the sulfur screen, the operator stays signed in for a 10-minute
   // grace period (Operator.leave), so popping out to Home needs no rescan.
-  if (hash !== "#sulfur") Operator.leave();
+  if (hash !== "#sulfur" && hash !== "#acid") Operator.leave();
+  const badged = m && (m.id === "sulfur" || m.id === "acid"); // roles that open with a badge scan
   const view = inSettings ? (unlocked ? "settings" : "pin")
-    : m && m.id === "sulfur" ? (Operator.current() ? "sulfur" : "scan")
+    : badged ? (Operator.current() ? m.id : "scan")
     : m ? "module" : "home";
-  for (const id of ["home", "module", "scan", "sulfur", "pin", "settings"]) $(id).classList.toggle("hidden", id !== view);
+  for (const id of ["home", "module", "scan", "sulfur", "acid", "pin", "settings"]) $(id).classList.toggle("hidden", id !== view);
   // The settings menu replaces the main one only once the PIN is in; the
   // PIN pad keeps the main menu so Home is one tap away.
   $("mainNav").classList.toggle("hidden", view === "settings");
@@ -199,6 +201,7 @@ function show() {
   if (view !== "scan") stopCamera();
   if (view === "scan") $("scanMsg").textContent = "";
   if (view === "sulfur") renderSulfur(true);
+  if (view === "acid") renderAcid(true);
   if (view === "settings") {
     touchSettings();
     document.querySelectorAll("[data-settings-page]").forEach((el) =>
@@ -239,6 +242,7 @@ Boord.boot(() => {
   renderPinPad();
   renderSettingsNav();
   initSulfur();
+  initAcid();
   // Never inherit a sign-in: a tablet reloaded (or an installed app reopened)
   // may still hold the session cookie, and the next person must type the PIN.
   Boord.api("/api/admin/logout", { method: "POST" }).catch(() => {});

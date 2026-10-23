@@ -65,7 +65,7 @@ The home screen is a grid of large icons, sized for wet hands and gloves. Each o
 
 ### Acid bath
 
-- One panel per bath (two at Laughing Waters, one per line).
+- One panel per bath (two at Laughing Waters, one per line). **Built (v0.14).** Export batches are picked from finished sulfur runs; local batches straight from grading.
 - **A batch** is crates going through: start, dip timer, drying timer, done.
 - Bath health: days and crates since the last chemical change. It warns when a bath hasn't been changed in 3 to 4 days (the SOP requires at least two changes a week) or when it passes 500 crates; both limits are settings. A Concentration check button logs each reading. A **Chemicals changed** button resets it and logs who changed it and when.
 - Captures: batch ID, bath ID, number of crates, times, operator, chemical changes, concentration checks.
