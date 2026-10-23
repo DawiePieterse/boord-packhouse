@@ -12,18 +12,20 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 import config
+from backup import start_backup_scheduler
 from db import init_packhouse_db
-from routers import admin, version, weather
+from routers import admin, backups, version, weather
 
 app = FastAPI(title="Boord Packhouse")
 
-for module in (admin, version, weather):
+for module in (admin, backups, version, weather):
     app.include_router(module.router)
 
 
 @app.on_event("startup")
 def on_startup():
     init_packhouse_db()
+    start_backup_scheduler()
 
 
 class NoCacheStaticFiles(StaticFiles):

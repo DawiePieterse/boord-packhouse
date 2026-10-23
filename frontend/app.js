@@ -101,6 +101,53 @@ async function changePin(ev) {
   }
 }
 
+// Backups card in Settings - Boord Admin's, trimmed (backend/backup.py).
+function fmtSize(bytes) {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(2)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+async function loadBackupsList() {
+  let backups;
+  try {
+    backups = await Boord.api("/api/backups");
+  } catch (e) {
+    if (e.status === 401) { unlocked = false; show(); }
+    return;
+  }
+  $("backupsTable").innerHTML = backups.map((b) => `
+    <tr class="border-b">
+      <td class="p-2">${esc(Boord.fmtDateTime(b.created_at))}</td>
+      <td class="p-2">${fmtSize(b.size_bytes)}</td>
+      <td class="p-2 text-right"><a href="#" class="text-blue-700 text-xs" data-download="${esc(b.filename)}">Download</a></td>
+    </tr>`).join("") || `<tr><td class="p-2 text-slate-400" colspan="3">No backups yet</td></tr>`;
+}
+
+async function downloadBackup(ev) {
+  const a = ev.target.closest("[data-download]");
+  if (!a) return;
+  ev.preventDefault();
+  try {
+    const blob = await Boord.api(`/api/backups/${encodeURIComponent(a.dataset.download)}/download`, { timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
+    Boord.downloadBlob(blob, a.dataset.download);
+  } catch (e) {
+    Boord.toast(Boord.errorDetail(e, "No connection to the server"));
+  }
+}
+
+async function runBackupNow() {
+  $("runBackupBtn").disabled = true;
+  try {
+    await Boord.api("/api/backups", { method: "POST", timeoutMs: Boord.UPLOAD_TIMEOUT_MS });
+    Boord.toast("Backup created");
+    await loadBackupsList();
+  } catch (e) {
+    if (e.status === 401) { unlocked = false; show(); return; }
+    Boord.toast(Boord.errorDetail(e, "No connection to the server"));
+  } finally {
+    $("runBackupBtn").disabled = false;
+  }
+}
+
 // --------------------------------------------------------------------------
 // Which screen. The hash decides: "" home, #<module>, #settings.
 // --------------------------------------------------------------------------
@@ -117,7 +164,7 @@ function show() {
     $("moduleBlurb").textContent = m.blurb;
   }
   if (view === "pin") { pinEntry = ""; $("pinError").textContent = ""; renderPinDots(); }
-  if (view === "settings") touchSettings();
+  if (view === "settings") { touchSettings(); loadBackupsList(); }
   document.querySelectorAll("[data-nav]").forEach((a) =>
     a.classList.toggle("tab-active", a.dataset.nav === (hash === "#settings" ? "settings" : "home")));
   window.scrollTo(0, 0);
@@ -180,6 +227,8 @@ Boord.boot(() => {
   // may still hold the session cookie, and the next person must type the PIN.
   Boord.api("/api/admin/logout", { method: "POST" }).catch(() => {});
   $("pinChangeForm").addEventListener("submit", changePin);
+  $("runBackupBtn").addEventListener("click", runBackupNow);
+  $("backupsTable").addEventListener("click", downloadBackup);
   $("settings").addEventListener("pointerdown", touchSettings);
   $("settings").addEventListener("input", touchSettings);
   window.addEventListener("hashchange", show);
