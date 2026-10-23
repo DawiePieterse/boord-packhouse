@@ -65,6 +65,7 @@ class RunIn(SQLModel):
     fruit_kg: Optional[float] = None
     suggestion_temp: Optional[float] = None
     suggestion_humidity: Optional[float] = None
+    estimated_ppm: Optional[float] = None
 
 
 class SyncIn(SQLModel):

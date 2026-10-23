@@ -163,6 +163,7 @@ function idleCard(tent) {
           <button type="button" data-step="5" class="keypad-btn font-bold">+5</button>
         </div>
         <div data-suggestion class="mt-2 text-sm rounded-lg bg-sky-50 text-sky-900 p-2 hidden"></div>
+        <div data-residue class="mt-2 text-sm rounded-lg p-2 border hidden"></div>
       </div>
       <label class="block"><span class="text-xs text-slate-500">Fruit source</span>
         <select data-field="source" class="w-full border border-slate-300 rounded-lg p-3 text-lg bg-white">${sourceOptions(d.source)}</select></label>
@@ -183,6 +184,7 @@ function runBlock(r, several) {
       <div class="text-sm text-slate-600 text-center">
         ${esc(r.grams)} g · ${esc(r.crates)} crates · ${esc(source)}<br>
         Started ${esc(Boord.fmtTime(started))} by ${esc(r.started_by_name || r.started_by)} · ${esc(r.minutes)} min
+        ${r.estimated_ppm != null ? `<br>Est. aril SO₂ when started: ${esc(r.estimated_ppm)} ppm` : ""}
         ${r.synced === 0 ? `<br><span class="text-amber-700"><i class="fa-solid fa-cloud-arrow-up"></i> Not sent to the server yet</span>` : ""}
       </div>
       <button type="button" data-done="${esc(r.uuid)}" class="w-full bg-green-600 text-white rounded-xl py-4 text-xl font-bold">
@@ -219,6 +221,29 @@ function suggestionFor(tent, d) {
   return { input, result: suggestMinutes(input, settings) };
 }
 
+// The aril SO2 line: the estimate for the time and grams on the card now,
+// against the EU limit. Says plainly when the anchor is still an assumption.
+const RESIDUE_STYLE = {
+  ok:   ["bg-green-50 text-green-900 border-green-200", "fa-circle-check"],
+  warn: ["bg-amber-50 text-amber-900 border-amber-300", "fa-triangle-exclamation"],
+  over: ["bg-red-50 text-red-800 border-red-300", "fa-circle-xmark"],
+};
+
+function showResidue(card, minutes, s) {
+  const box = card.querySelector("[data-residue]");
+  const settings = Store.sulfurSettings();
+  const est = s && settings && settings.residue_ref_ppm ? estimateResidue(Number(minutes), s.result, settings) : null;
+  box.classList.toggle("hidden", !est);
+  if (!est) return;
+  const [style, icon] = RESIDUE_STYLE[est.level];
+  box.className = `mt-2 text-sm rounded-lg p-2 border ${style}`;
+  box.innerHTML = `<div><i class="fa-solid ${icon}"></i> <b>Est. aril SO₂: ${est.ppm} ppm</b> · EU limit ${settings.residue_limit_ppm} ppm</div>
+    <div class="text-xs opacity-80">${est.level === "over" ? "Over the EU limit - shorten the time or use less sulfur. "
+      : est.level === "warn" ? "Close to the EU limit. " : ""}${settings.residue_calibrated
+      ? "Estimate from the farm's lab result."
+      : `Not calibrated: assumes ${settings.residue_ref_ppm} ppm at the reference load until a lab result is entered in Settings → Sulfur.`}</div>`;
+}
+
 // Updates each idle card's suggestion in place (never a rebuild, which would
 // wipe what is being typed). Until the operator steps the time, the time
 // follows the suggestion.
@@ -242,6 +267,7 @@ function refreshSuggestions() {
       </div>
       <div class="text-xs opacity-80">${esc(describeSuggestion(tent.default_minutes, s.result))}${
         Store.weather() ? "" : " · no recent weather"}${findSource(d.source) ? "" : " · choose the fruit for its weight and variety"}</div>`;
+    showResidue(card, d.minutes, s);
   });
 }
 
@@ -298,6 +324,7 @@ async function startRun(card) {
     ended_at: null, ended_by: "", ended_by_name: "",
     // Kept beside the minutes chosen, to tune Settings -> Sulfur later.
     suggested_minutes: s ? s.result.minutes : null, fruit_kg: s ? s.result.fruitKg : null,
+    estimated_ppm: s && Store.sulfurSettings() ? (estimateResidue(minutes, s.result, Store.sulfurSettings()) || {}).ppm ?? null : null,
     suggestion_temp: s ? s.input.temp : null, suggestion_humidity: s ? s.input.humidity : null,
   });
   delete drafts[tent.id];
@@ -495,6 +522,8 @@ const SULFUR_FIELDS = [
   ["temp_pct_per_deg", "% shorter per °C hotter"], ["humidity_pct_per_pct", "% longer per % more humid"],
   ["Limits", null],
   ["min_minutes", "Shortest (min)"], ["max_minutes", "Longest (min)"], ["round_to", "Round to (min)"],
+  ["Aril SO₂ - the estimate is this residue at the reference load, scaled by time and dose. It does not allow for the acid dip, ripeness or holding fruit overnight, which all raise residue.", null],
+  ["residue_ref_ppm", "Residue at reference (ppm)"], ["residue_limit_ppm", "EU limit (ppm)"], ["residue_warn_ppm", "Warn from (ppm)"],
 ];
 
 async function loadSulfurSettings() {
@@ -521,7 +550,12 @@ async function loadSulfurSettings() {
         <input name="${key}" type="number" step="any" inputmode="decimal" value="${esc(s[key])}" class="w-full border border-slate-300 rounded-lg p-2"></label>`;
     }
   }
-  html += `</div></div>
+  // The last group is Aril SO2: its lab-result tick goes under its numbers.
+  html += `</div>
+      <label class="flex items-start gap-2 text-sm mt-3">
+        <input name="residue_calibrated" type="checkbox"${s.residue_calibrated ? " checked" : ""} class="w-5 h-5 mt-0.5">
+        <span>The residue at reference is a <b>lab result</b> (Monier-Williams) from a run at the reference load, not an assumption</span></label>
+    </div>
     <div class="bg-white rounded-2xl shadow p-4">
       <div class="font-semibold">Varieties</div>
       <div class="text-xs text-slate-500 mb-2">Times the time by this: 1.0 means no change, 0.9 is 10% shorter. From the blocks in Boord.</div>
@@ -540,6 +574,7 @@ async function saveSulfurSettings(ev) {
   const form = $("sulfurSettingsForm");
   const body = { variety_factors: {} };
   for (const [key, label] of SULFUR_FIELDS) if (label !== null) body[key] = Number(form.elements[key].value);
+  body.residue_calibrated = form.elements.residue_calibrated.checked;
   form.querySelectorAll("[data-variety]").forEach((el) => { body.variety_factors[el.dataset.variety] = Number(el.value); });
   try {
     await Boord.api("/api/settings/sulfur", { method: "PUT", body });

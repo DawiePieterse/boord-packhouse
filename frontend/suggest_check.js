@@ -1,12 +1,13 @@
 // Self-check for suggest.js:  node frontend/suggest_check.js
 // Also run by backend/tests/test_suggest.py.
 const assert = require("assert");
-const { suggestMinutes, describeSuggestion } = require("./suggest.js");
+const { suggestMinutes, describeSuggestion, estimateResidue } = require("./suggest.js");
 
 const settings = {
   ref_grams: 425, ref_crates: 24, ref_crate_kg: 20, ref_temp: 25, ref_humidity: 60,
   temp_pct_per_deg: 2, humidity_pct_per_pct: 0.5, min_minutes: 30, max_minutes: 120, round_to: 5,
   variety_factors: '{"Mauritius": 1.0, "McLean\'s Red": 0.9}',
+  residue_ref_ppm: 5, residue_limit_ppm: 10, residue_warn_ppm: 8,
 };
 const load = { baseMinutes: 60, grams: 425, crates: 24, crateKg: 20, variety: "Mauritius", temp: 25, humidity: 60 };
 
@@ -43,5 +44,21 @@ assert.ok(describeSuggestion(60, r).endsWith("kept within the limits"));
 // Zero percentages and factors of 1.0 make it the plain tent default.
 const flat = { ...settings, temp_pct_per_deg: 0, humidity_pct_per_pct: 0, variety_factors: "{}" };
 assert.strictEqual(suggestMinutes({ ...load, temp: 38, humidity: 10, variety: "McLean's Red" }, flat).minutes, 60);
+
+// Aril SO2: the suggested time holds the anchor; residue scales with time.
+r = suggestMinutes(load, settings);
+assert.deepStrictEqual(estimateResidue(60, r, settings), { ppm: 5, level: "ok" });
+assert.deepStrictEqual(estimateResidue(96, r, settings), { ppm: 8, level: "warn" });
+assert.deepStrictEqual(estimateResidue(120, r, settings), { ppm: 10, level: "over" });
+
+// Hot and dry: the suggestion shortens (46.8 min raw) so its own time stays at
+// 5 ppm, while keeping the reference 60 min there would be ~6.4 ppm.
+r = suggestMinutes({ ...load, temp: 31, humidity: 40 }, settings);
+assert.strictEqual(estimateResidue(r.raw, r, settings).ppm, 5);
+assert.strictEqual(estimateResidue(60, r, settings).ppm, 6.4);
+
+// More sulfur on the same fruit: the same 60 min gives double the dose.
+r = suggestMinutes({ ...load, grams: 850 }, settings);
+assert.strictEqual(estimateResidue(60, r, settings).ppm, 10);
 
 console.log("suggest.js: all checks passed");

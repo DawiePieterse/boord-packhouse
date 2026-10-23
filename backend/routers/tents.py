@@ -80,6 +80,10 @@ class SulfurSettingsIn(SQLModel):
     max_minutes: int
     round_to: int
     variety_factors: Dict[str, float] = {}
+    residue_ref_ppm: float = 5.0
+    residue_calibrated: bool = False
+    residue_limit_ppm: float = 10.0
+    residue_warn_ppm: float = 8.0
 
 
 @router.get("/sulfur")
@@ -95,6 +99,8 @@ def save_sulfur_settings(body: SulfurSettingsIn, session: Session = Depends(get_
         raise HTTPException(422, "The reference grams, crates and crate weight must be positive")
     if not (1 <= body.min_minutes <= body.max_minutes <= 600 and body.round_to >= 1):
         raise HTTPException(422, "Minutes must run from a minimum up to a maximum, and round to at least 1")
+    if not (body.residue_ref_ppm > 0 and 0 < body.residue_warn_ppm <= body.residue_limit_ppm):
+        raise HTTPException(422, "The residue anchor must be above 0, and the warning at or below the limit")
     if any(not (0 < f <= 5) for f in body.variety_factors.values()):
         raise HTTPException(422, "A variety factor must be above 0 (1.0 means no change)")
     row = session.get(SulfurSettings, 1)

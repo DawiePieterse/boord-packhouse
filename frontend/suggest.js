@@ -14,6 +14,12 @@
 //   3. the variety's factor - McLean's Red takes up more than Mauritius;
 // then rounded and kept between the minimum and maximum.
 //
+// The aril SO2 estimate follows from that design: the suggestion is the time
+// that keeps residue where it was at the reference conditions, so a chosen
+// time t gives roughly anchor ppm x t / (unrounded suggestion). Residue goes
+// with SO2 dose = concentration x time. The anchor is one residue at the
+// reference conditions - an assumption until a lab result replaces it.
+//
 // Plain functions and no DOM, so `node frontend/suggest_check.js` can test it.
 
 function suggestMinutes(input, settings) {
@@ -55,7 +61,7 @@ function suggestMinutes(input, settings) {
 
   const rounded = Math.round(minutes / s.round_to) * s.round_to;
   const final = Math.min(s.max_minutes, Math.max(s.min_minutes, rounded));
-  return { minutes: final, fruitKg: Math.round(fruitKg), steps, clamped: final !== rounded };
+  return { minutes: final, raw: minutes, fruitKg: Math.round(fruitKg), steps, clamped: final !== rounded };
 }
 
 // "60 base · +4 more fruit per gram · −6 hot & dry 31°C 40% · −5 McLean's Red"
@@ -66,4 +72,13 @@ function describeSuggestion(baseMinutes, result) {
   return parts.join(" · ");
 }
 
-if (typeof module !== "undefined") module.exports = { suggestMinutes, describeSuggestion };
+// Estimated aril SO2 (ppm) for running `minutes` where suggestMinutes gave
+// `result`, and how it stands against the EU limit: "ok", "warn" or "over".
+function estimateResidue(minutes, result, settings) {
+  const ppm = result.raw > 0 ? (settings.residue_ref_ppm * minutes) / result.raw : null;
+  if (ppm == null) return null;
+  const level = ppm >= settings.residue_limit_ppm ? "over" : ppm >= settings.residue_warn_ppm ? "warn" : "ok";
+  return { ppm: Math.round(ppm * 10) / 10, level };
+}
+
+if (typeof module !== "undefined") module.exports = { suggestMinutes, describeSuggestion, estimateResidue };

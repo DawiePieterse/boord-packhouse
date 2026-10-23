@@ -65,6 +65,9 @@ class SulfurRun(SQLModel, table=True):
     fruit_kg: Optional[float] = None
     suggestion_temp: Optional[float] = None
     suggestion_humidity: Optional[float] = None
+    # The aril SO2 estimate shown when the run started (frontend/suggest.js),
+    # for comparing with lab results later. An estimate, never a measurement.
+    estimated_ppm: Optional[float] = None
 
 
 class SulfurSettings(SQLModel, table=True):
@@ -95,3 +98,14 @@ class SulfurSettings(SQLModel, table=True):
     max_minutes: int = 120
     round_to: int = 5
     variety_factors: str = '{"Mauritius": 1.0, "McLean\'s Red": 0.9}'  # JSON: variety -> factor
+    # Aril SO2 against the EU limit. No published model predicts it, so the
+    # estimate is anchored to one residue at the reference conditions and
+    # scaled by chosen / suggested time: the suggestion is the time that
+    # keeps residue at the anchor. The anchor starts as an assumption (5 ppm,
+    # the farm's choice) until a lab result replaces it - residue_calibrated
+    # says which, and the screen says so too. It does not model the acid dip,
+    # fruit maturity or holding overnight, which all raise residue.
+    residue_ref_ppm: float = 5.0
+    residue_calibrated: bool = False
+    residue_limit_ppm: float = 10.0   # EU limit for SO2 in the aril
+    residue_warn_ppm: float = 8.0
