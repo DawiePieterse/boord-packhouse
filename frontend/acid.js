@@ -19,14 +19,27 @@ const drying = () => Store.acidBatches().filter((b) => b.dip_ended_at && !b.ende
 const activeBatches = () => Store.acidBatches().filter((b) => !b.ended_at);
 const dipEndsAt = (b) => Date.parse(b.started_at) + b.dip_minutes * 60000;
 const dryEndsAt = (b) => Date.parse(b.dip_ended_at) + b.dry_minutes * 60000;
-const latest = (rows, key) => rows.sort((a, b) => Date.parse(a[key]) - Date.parse(b[key])).pop() || null;
+const latest = (rows, key) => rows.reduce((best, r) => (!best || Date.parse(r[key]) > Date.parse(best[key]) ? r : best), null);
 
 // Days and crates since the bath's last chemical change, and whether it is due.
+//
+// The server adds up the crates since its latest change (acid.py's /state
+// `health`), because it no longer sends a bath's whole history. On top go
+// this tablet's batches the server has not counted yet: those it has never
+// had (not in /state's list, and not refused). A change made here and not yet
+// sent restarts the count from it, out of the batches this tablet knows of -
+// all made after that change, so all of them are here.
 function bathHealth(bath) {
   const change = latest(Store.acidChanges().filter((c) => c.bath_id === bath.id), "changed_at");
   const since = change ? Date.parse(change.changed_at) : 0;
-  const crates = Store.acidBatches().filter((b) => b.bath_id === bath.id && Date.parse(b.started_at) >= since)
-    .reduce((n, b) => n + b.crates, 0);
+  const state = Store.acidState();
+  const server = (state.health || []).find((h) => h.bath_id === bath.id);
+  const mine = Store.acidBatches().filter((b) => b.bath_id === bath.id && Date.parse(b.started_at) >= since);
+  const sum = (rows) => rows.reduce((n, b) => n + b.crates, 0);
+  const listed = new Set((state.batches || []).map((b) => b.uuid));
+  const crates = server && server.change_uuid === (change ? change.uuid : null)
+    ? server.crates + sum(mine.filter((b) => b.synced === 0 && !listed.has(b.uuid)))
+    : sum(mine);
   const days = change ? (Store.now() - since) / 864e5 : null;
   const check = latest(Store.acidChecks().filter((c) => c.bath_id === bath.id), "checked_at");
   return { change, crates, days, check, due: !change || days >= bath.change_days || crates >= bath.change_crates };
@@ -35,7 +48,9 @@ function bathHealth(bath) {
 // Export fruit: a finished sulfur run not yet through a bath. Local fruit:
 // straight from grading, chosen by block or supplier like a tent load.
 function exportRuns() {
-  const used = new Set(Store.acidBatches().map((b) => b.sulfur_run_uuid).filter(Boolean));
+  // Dipped on any tablet in any bath, retired ones too (/state's used_runs),
+  // or by a batch this tablet has not sent yet.
+  const used = new Set([...(Store.acidState().used_runs || []), ...Store.acidBatches().map((b) => b.sulfur_run_uuid).filter(Boolean)]);
   return Store.runs().filter((r) => r.ended_at && !used.has(r.uuid))
     .sort((a, b) => Date.parse(b.ended_at) - Date.parse(a.ended_at));
 }
@@ -159,7 +174,7 @@ function renderAcid(force = false) {
   const op = Operator.current();
   const baths = Store.baths();
   const signature = JSON.stringify([baths, Store.acidBatches().map((b) => [b.uuid, b.synced, b.dip_ended_at, b.ended_at]),
-    Store.acidChanges().map((c) => c.uuid), Store.acidChecks().map((c) => c.uuid),
+    Store.acidChanges().map((c) => c.uuid), Store.acidChecks().map((c) => c.uuid), Store.acidState().health,
     exportRuns().map((r) => r.uuid), Store.sources(), op && op.id]);
   if (!force && signature === acidSignature) return;
   acidSignature = signature;

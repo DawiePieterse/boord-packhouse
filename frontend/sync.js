@@ -22,10 +22,20 @@ const Store = (() => {
   let lastWorkers = 0;
   let localRuns = new Map(); // uuid -> record, this tablet's outbox (synced or not)
 
+  // Parsed once and kept in memory: the 1-second tick reads these many times
+  // over, and re-parsing localStorage each time is what a slow tablet feels.
+  // Only keep() writes them, so it refreshes the copy. Shared: never mutate.
+  const memo = new Map();
   function cached(key, fallback) {
-    try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch (_) { return fallback; }
+    if (!memo.has(key)) {
+      let value = null;
+      try { value = JSON.parse(localStorage.getItem(key)); } catch (_) { /* unreadable: the fallback */ }
+      memo.set(key, value);
+    }
+    return memo.get(key) ?? fallback;
   }
   function keep(key, value) {
+    memo.set(key, value);
     try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) { /* full: keep the old copy */ }
   }
 
@@ -83,17 +93,37 @@ const Store = (() => {
     // copy, and without a kind it would go to the sulfur endpoint and fail.
     const all = new Map(serverRows.map((r) => [r.uuid, { ...r, kind }]));
     for (const r of localRuns.values()) {
-      if (kindOf(r) !== kind) continue;
+      // A record the server refused is never shown: a refused batch would
+      // otherwise sit "dipping" here, alarm and all, until it was pruned.
+      if (kindOf(r) !== kind || r.error) continue;
       const server = all.get(r.uuid);
       if (!server || (!server.ended_at && r.ended_at) || (!server.dip_ended_at && r.dip_ended_at)) all.set(r.uuid, r);
     }
     return [...all.values()];
   }
 
+  // One module's outbox to its own endpoint. Refused records are marked so
+  // they stop being resent.
+  async function sendOutbox(path, body, pending) {
+    const sentAt = Date.now();
+    const out = await Boord.api(path, { method: "POST", body: { device: device(), ...body } });
+    learnClock(out.server_now, sentAt);
+    const synced = new Set(out.synced);
+    await IDB.markSynced(pending.filter((r) => synced.has(r.uuid)));
+    for (const bad of out.rejected) {
+      // Refused for good (a deleted tent, a bad value): stop resending it
+      // and say so, rather than pinning the pill on amber forever.
+      console.warn("Record refused by the server:", bad);
+      Boord.toast(`A record was refused by the server: ${bad.error}`);
+      await IDB.markSynced(pending.filter((r) => r.uuid === bad.uuid), bad.error);
+    }
+  }
+
   async function syncNow() {
     if (busy) return;
     busy = true;
     let pending = [];
+    let failed = null; // a module's sync that errored, after the others were sent
     try {
       pending = await IDB.pending().catch(() => []);
       if (!navigator.onLine) throw Object.assign(new Error("offline"), { offline: true });
@@ -102,17 +132,14 @@ const Store = (() => {
         for (const [path, bodyOf] of OUTBOXES) {
           const body = bodyOf(pending);
           if (!Object.values(body).some((rows) => rows.length)) continue;
-          const sentAt = Date.now();
-          const out = await Boord.api(path, { method: "POST", body: { device: device(), ...body } });
-          learnClock(out.server_now, sentAt);
-          const synced = new Set(out.synced);
-          await IDB.markSynced(pending.filter((r) => synced.has(r.uuid)));
-          for (const bad of out.rejected) {
-            // Refused for good (a deleted tent, a bad value): stop resending it
-            // and say so, rather than pinning the pill on amber forever.
-            console.warn("Record refused by the server:", bad);
-            Boord.toast(`A record was refused by the server: ${bad.error}`);
-            await IDB.markSynced(pending.filter((r) => r.uuid === bad.uuid), bad.error);
+          // Each module on its own: a sulfur endpoint that errors must not
+          // hold the acid records back, or the other way round. A dropped
+          // connection still stops the pass - the next one would fail too.
+          try {
+            await sendOutbox(path, body, pending);
+          } catch (e) {
+            if (Boord.isNetworkError(e)) throw e;
+            failed = e;
           }
         }
         await IDB.prune().catch(() => {});
@@ -128,6 +155,7 @@ const Store = (() => {
       keep("ph_acid", await Boord.api("/api/acid/state"));
       keep("ph_baths", await Boord.api("/api/baths"));
       if (Date.now() - lastWorkers > WORKERS_EVERY_MS) await refreshWorkers();
+      if (failed) throw failed;
       const left = (await IDB.pending().catch(() => [])).length;
       setPill(left ? "pending" : "synced", left ? `Syncing ${left}...` : "Online - synced");
     } catch (e) {
@@ -175,6 +203,9 @@ const Store = (() => {
     acidBatches: () => merged(cached("ph_acid", {}).batches || [], "acid_batch"),
     acidChanges: () => merged(cached("ph_acid", {}).changes || [], "acid_change"),
     acidChecks: () => merged(cached("ph_acid", {}).checks || [], "acid_check"),
+    // /state as the server sent it, unmerged: its per-bath crate sums
+    // (health), the batches it listed and every sulfur run dipped lately.
+    acidState: () => cached("ph_acid", {}),
 
     // Make or update a record: into the outbox first, then try to send it.
     async saveRun(r) {

@@ -60,21 +60,42 @@ def test_bad_batches_are_rejected_not_stored(client, bad):
     assert state(client)["batches"] == []
 
 
-def test_state_is_batches_since_the_last_change(client):
+def test_state_is_bounded_and_counts_crates_since_the_last_change(client):
     now = datetime.now(timezone.utc)
     week = now - timedelta(days=7)
     done = {"dip_ended_at": _iso(week), "ended_at": _iso(week)}
     sync(client, [batch("before", started=week - timedelta(days=1), **done),
-                  batch("after", started=week + timedelta(hours=1), **done),
+                  batch("after", started=week + timedelta(hours=1), crates=10, **done),
+                  batch("today", started=now - timedelta(hours=1), crates=5, sulfur_run_uuid="r2"),
                   batch("other-bath", bath_id=2, started=week - timedelta(days=1), **done)],
          changes=[{"uuid": "c0", "bath_id": 1, "changed_at": _iso(week - timedelta(days=4))},
                   {"uuid": "c1", "bath_id": 1, "changed_at": _iso(week), "crates_since": 24, "by": "002"}],
          checks=[{"uuid": "k1", "bath_id": 1, "checked_at": _iso(now), "value": 1.8, "by": "001"}])
     s = state(client)
-    # Bath 1: only since its last change. Bath 2 never changed: all of it.
-    assert {b["uuid"] for b in s["batches"]} == {"after", "other-bath"}
+    # Only what is still going or from the last day, whatever the changes.
+    assert {b["uuid"] for b in s["batches"]} == {"today"}
     assert [c["uuid"] for c in s["changes"]] == ["c1"]
     assert s["checks"][0]["value"] == 1.8
+    # Bath 1 counts from its last change; bath 2 never changed: all of it.
+    assert {h["bath_id"]: (h["crates"], h["change_uuid"]) for h in s["health"]} == {1: (15, "c1"), 2: (24, None)}
+    # "before" and "after" were dipped over a week ago: outside the window.
+    assert s["used_runs"] == ["r2"]
+
+
+def test_used_runs_include_retired_baths(admin_client):
+    sync(admin_client, [batch("b2", bath_id=2, sulfur_run_uuid="r9")])
+    admin_client.put("/api/settings/baths/2", json={"name": "Bath 2", "active": False})
+    s = state(admin_client)
+    assert s["batches"] == [] and s["used_runs"] == ["r9"]
+
+
+def test_a_stage_never_ends_before_the_one_before(client):
+    now = datetime.now(timezone.utc)
+    sync(client, [batch(started=now, dip_ended_at=_iso(now - timedelta(seconds=20)), dip_ended_by="002")])
+    sync(client, [batch(started=now, dip_ended_at=_iso(now + timedelta(minutes=5)),
+                        ended_at=_iso(now - timedelta(minutes=1)), ended_by="001")])
+    b = state(client)["batches"][0]
+    assert b["dip_ended_at"] == b["started_at"] and b["ended_at"] == b["dip_ended_at"]
 
 
 def test_bath_settings_need_the_pin(client):
