@@ -11,6 +11,19 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Packhouse">
 <meta name="theme-color" content="#0A2F6B">
+<script>
+// One release per page load. When a new release's service worker takes over a
+// page that was already loading, part of that page may be the old release
+// (index.html, from the old offline copy) and the rest the new one (files
+// fetched after the takeover) - the new Settings menu then pointed at a Setup
+// section the old index.html did not have, and showed an empty page. Reload
+// once, so every file comes from the same release. Runs are safe: they live in
+// the IndexedDB outbox, not on the page. Inline and first, so the listener is
+// in place before any other file loads.
+if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
+  navigator.serviceWorker.addEventListener("controllerchange", () => location.reload());
+}
+</script>
 <script src="shared/tailwind.js"></script>
 <link rel="stylesheet" href="shared/vendor/fontawesome/css/all.min.css">
 <link rel="stylesheet" href="shared/styles.css">
