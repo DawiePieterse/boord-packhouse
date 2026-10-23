@@ -43,6 +43,31 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def advance(row, rec, stages) -> None:
+    """Move a synced record's stages forward, one way, for both modules: each
+    stage the row has not ended yet takes the tablet's time and its
+    `<stage>_by` names; one already ended stays as first sent. `stages` are
+    the time fields in order (a run's ended_at; a batch's dip_ended_at then
+    ended_at), each after `started_at`.
+
+    No stage ends before the one before it. Two tablets' clocks are only
+    corrected to the server's to within a request, and an offline one not at
+    all, so a run ended on another tablet can arrive a little "before" it
+    started. Refusing it would leave it going on the server for ever;
+    clamping keeps the record and loses only the skew."""
+    if not stages:
+        return
+    floor = row.started_at
+    for key in stages:
+        when = _utc_naive(getattr(rec, key))
+        if getattr(row, key) is None and when is not None:
+            by = key.replace("_at", "_by")
+            setattr(row, key, max(when, floor))
+            setattr(row, by, getattr(rec, by))
+            setattr(row, by + "_name", getattr(rec, by + "_name"))
+        floor = getattr(row, key) or floor
+
+
 class RunIn(SQLModel):
     uuid: str
     tent_id: int
@@ -102,23 +127,18 @@ def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
         if problem:
             rejected.append({"uuid": run.uuid, "error": problem})
             continue
-        started_at, ended_at = _utc_naive(run.started_at), _utc_naive(run.ended_at)
-        existing = session.get(SulfurRun, run.uuid)
-        if existing is None:
+        row = session.get(SulfurRun, run.uuid)
+        if row is None:
             row = SulfurRun(**run.model_dump(exclude={"started_at", "ended_at"}),
-                            started_at=started_at, ended_at=ended_at,
+                            started_at=_utc_naive(run.started_at),
                             device=body.device, synced_at=now)
-            if abs(now - started_at) <= WEATHER_FRESH:
+            if abs(now - row.started_at) <= WEATHER_FRESH:
                 if weather is None:
                     weather = farm_weather(timeout=3)
                 row.weather_temp = weather.get("temp")
                 row.weather_humidity = weather.get("humidity")
-            session.add(row)
-        elif existing.ended_at is None and ended_at is not None:
-            existing.ended_at = ended_at
-            existing.ended_by = run.ended_by
-            existing.ended_by_name = run.ended_by_name
-            session.add(existing)
+        advance(row, run, ("ended_at",))
+        session.add(row)
         synced.append(run.uuid)
     session.commit()
     return {"server_now": _iso(now), "synced": synced, "rejected": rejected}
