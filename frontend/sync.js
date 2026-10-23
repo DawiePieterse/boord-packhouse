@@ -65,7 +65,10 @@ const Store = (() => {
     const { synced, error, kind, ...rest } = r;
     return rest;
   }
-  const ofKind = (rows, kind) => rows.filter((r) => (r.kind || "") === kind).map(wire);
+  // v0.14 queued acid batches ended on a second tablet with no kind; they have
+  // dip_minutes, a sulfur run never does.
+  const kindOf = (r) => r.kind || (r.dip_minutes != null ? "acid_batch" : "");
+  const ofKind = (rows, kind) => rows.filter((r) => kindOf(r) === kind).map(wire);
   // Where each kind of outbox record is sent; sulfur runs have no kind.
   const OUTBOXES = [
     ["/api/sulfur/sync", (rows) => ({ runs: ofKind(rows, "") })],
@@ -80,7 +83,7 @@ const Store = (() => {
     // copy, and without a kind it would go to the sulfur endpoint and fail.
     const all = new Map(serverRows.map((r) => [r.uuid, { ...r, kind }]));
     for (const r of localRuns.values()) {
-      if ((r.kind || "") !== kind) continue;
+      if (kindOf(r) !== kind) continue;
       const server = all.get(r.uuid);
       if (!server || (!server.ended_at && r.ended_at) || (!server.dip_ended_at && r.dip_ended_at)) all.set(r.uuid, r);
     }
