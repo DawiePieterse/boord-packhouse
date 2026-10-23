@@ -1,0 +1,101 @@
+:root {
+  --boord-blue: #0A2F6B;
+  --boord-red: #C8102E;
+  --boord-green: #16a34a;
+  --boord-yellow: #eab308;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* Keep the browser's native pull-to-refresh out of the way of LWPTR's. */
+  overscroll-behavior-y: contain;
+  /* Stops a quick double tap on a keypad (weights, crate counts, PINs) from
+     zooming the page instead of typing two digits. This replaces the old
+     viewport "user-scalable=no", which also killed pinch zoom - and pinch
+     zoom is how older eyes read a small table in bright sun. */
+  touch-action: manipulation;
+}
+
+/* Safe areas. The pages ask for viewport-fit=cover so an installed app can
+   use the whole screen, which puts the top of the header under an iPhone's
+   notch or status bar and the bottom of the page under its home bar. These
+   push the content clear of both and change nothing on a phone without them.
+   They are written against the Tailwind padding class each page uses (two
+   classes outrank Tailwind's one), keeping that padding as the minimum. */
+.boord-header.p-3 { padding-top: max(0.75rem, env(safe-area-inset-top)); }
+.boord-header.p-4 { padding-top: max(1rem, env(safe-area-inset-top)); }
+body.pb-6 { padding-bottom: calc(1.5rem + env(safe-area-inset-bottom)); }
+body.pb-20 { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+/* A bar fixed to the bottom of the screen (a tab bar) grows by the home-bar
+   height so its buttons stay above it. */
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+/* Offline banner injected by Boord.offlineBanner() (shared/api.js). */
+.offline-banner {
+  background: #fef3c7;
+  color: #92400e;
+  border-bottom: 1px solid #fcd34d;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: center;
+}
+.offline-banner.hidden { display: none; }
+
+/* Pull-to-refresh indicator (shared/ptr.js). */
+.ptr-indicator {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translate(-50%, -56px);
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--boord-blue);
+  font-size: 1.1rem;
+  z-index: 60;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+.ptr-indicator.ready { color: var(--boord-green); }
+.ptr-indicator.spinning i { animation: ptr-spin 0.8s linear infinite; }
+@keyframes ptr-spin { to { transform: rotate(360deg); } }
+
+.boord-header { background: var(--boord-blue); color: white; }
+.boord-btn-primary { background: var(--boord-blue); color: white; }
+.boord-btn-primary:active { opacity: 0.85; }
+.boord-btn-danger { background: var(--boord-red); color: white; }
+
+.urgency-green { background-color: #dcfce7; border-left: 6px solid var(--boord-green); }
+.urgency-yellow { background-color: #fef9c3; border-left: 6px solid var(--boord-yellow); }
+.urgency-red { background-color: #fee2e2; border-left: 6px solid var(--boord-red); }
+
+.keypad-btn {
+  font-size: 1.25rem;
+  padding: 0.75rem 0;
+  border-radius: 0.75rem;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+.keypad-btn:active { background: #e2e8f0; }
+
+.tab-btn { flex: 1; text-align: center; padding: 0.6rem 0; font-size: 0.8rem; }
+.tab-btn.active { color: var(--boord-blue); font-weight: 600; border-bottom: 3px solid var(--boord-blue); }
+/* The current tab of a bottom tab bar, in the brand blue rather than a
+   Tailwind blue that is close to it but not the same. */
+.tab-active { color: var(--boord-blue); font-weight: 600; }
+
+.subtab-btn { padding: 0.4rem 1rem; border-radius: 999px; font-size: 0.85rem; background: #e2e8f0; color: #334155; }
+.subtab-btn.active { background: var(--boord-blue); color: white; font-weight: 600; }
+
+.date-preset-btn.active { background: var(--boord-blue); color: white; font-weight: 600; }
+
+.toast {
+  position: fixed; bottom: calc(5rem + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
+  background: #111827; color: white; padding: 0.6rem 1.2rem; border-radius: 999px;
+  font-size: 0.9rem; z-index: 50; opacity: 0; transition: opacity 0.2s;
+}
+.toast.show { opacity: 1; }

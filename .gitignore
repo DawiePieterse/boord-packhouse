@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Written by install.ps1 with this machine's own absolute paths (venv
+# location, Boord's boord.db path) - not portable, so not committed.
+start_packhouse_server.bat
+
+# The farm's own packhouse records and backups - one farm's data
+# never belongs in the repository.
+data/
+*.db
+*.db-wal
+*.db-shm
+
+.DS_Store

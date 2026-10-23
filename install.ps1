@@ -1,0 +1,437 @@
+# Boord Packhouse - Windows server installer
+#
+# Sets up the Packhouse service to run beside Boord on the same PC: installs
+# Python if needed, creates the virtual environment, installs dependencies,
+# asks where Boord's database is, writes the launcher, opens the firewall
+# port, and registers the service to auto-start at boot as SYSTEM. Safe to
+# re-run - each step checks what is already done.
+#
+# Run via install.bat, which handles the administrator-elevation prompt.
+
+$ErrorActionPreference = "Stop"
+
+$RepoRoot = $PSScriptRoot
+$BackendDir = Join-Path $RepoRoot "backend"
+$VenvDir = Join-Path $BackendDir ".venv"
+$DataDir = Join-Path $RepoRoot "data"
+$Port = 8060
+$TaskName = "Boord Packhouse Server"
+$FirewallRuleName = "Boord Packhouse Server"
+$PythonVersion = "3.11.9"
+$PythonInstallerUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-amd64.exe"
+$LauncherPath = Join-Path $RepoRoot "start_packhouse_server.bat"
+$ReleaseKeyPath = Join-Path $RepoRoot "release-key.asc"
+$FprFile = Join-Path $DataDir "release_key.fpr"
+# The default guess for Boord's database, if Boord is checked out beside this repo.
+$DefaultBoordDb = Join-Path (Split-Path $RepoRoot -Parent) "Boord\data\boord.db"
+
+function Write-Step($m) { Write-Host ""; Write-Host "==> $m" -ForegroundColor Cyan }
+function Write-Ok($m)   { Write-Host "    $m" -ForegroundColor Green }
+function Write-Warn($m) { Write-Host "    $m" -ForegroundColor Yellow }
+function Write-Err($m)  { Write-Host "    $m" -ForegroundColor Red }
+
+function Test-PythonOk($exe) {
+    if (-not $exe -or -not (Test-Path $exe)) { return $false }
+    try {
+        $out = & $exe -c "import sys; print(sys.version_info[0]); print(sys.version_info[1]); print('64BIT' if sys.maxsize > 2**32 else '32BIT')" 2>$null
+        if (-not $out -or $out.Count -lt 3) { return $false }
+        return ([int]$out[0] -eq 3 -and [int]$out[1] -ge 9 -and $out[2].Trim() -eq "64BIT")
+    } catch { return $false }
+}
+
+try {
+    $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        Write-Err "This script needs to run as Administrator. Run install.bat instead."
+        exit 1
+    }
+
+    Write-Host ""
+    Write-Host "Boord Packhouse - Server Installer" -ForegroundColor Cyan
+    Write-Host "================================================" -ForegroundColor Cyan
+
+    # --- Step 1: Find or install Python ---
+    Write-Step "Checking for Python 3.9+ (64-bit)..."
+    $pythonExe = $null
+    $existing = Get-Command python -ErrorAction SilentlyContinue
+    if ($existing -and (Test-PythonOk $existing.Source)) {
+        $pythonExe = $existing.Source
+        Write-Ok "Found a compatible Python at $pythonExe"
+    } else {
+        $wellKnown = Join-Path $env:ProgramFiles "Python311\python.exe"
+        if (Test-PythonOk $wellKnown) {
+            $pythonExe = $wellKnown
+            Write-Ok "Found a compatible Python at $pythonExe"
+        } else {
+            Write-Warn "No compatible 64-bit Python 3.9+ found - downloading Python $PythonVersion..."
+            $installer = Join-Path $env:TEMP "python-$PythonVersion-amd64.exe"
+            Invoke-WebRequest -Uri $PythonInstallerUrl -OutFile $installer -UseBasicParsing
+            Start-Process -FilePath $installer -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1 Include_test=0" -Wait
+            Remove-Item $installer -ErrorAction SilentlyContinue
+            $pythonExe = $wellKnown
+            if (-not (Test-PythonOk $pythonExe)) {
+                Write-Err "Python installation could not be confirmed. Install Python 3.9+ (64-bit) from python.org and re-run."
+                exit 1
+            }
+            Write-Ok "Installed Python at $pythonExe"
+        }
+    }
+
+    # --- Step 2: Git and GnuPG (both only needed by update_packhouse_server.bat) ---
+    #
+    # Neither is required to RUN the server, so nothing here is fatal - a farm
+    # that cannot update is still a farm that works. They are checked at
+    # install time anyway because the alternative is finding out months later,
+    # in the middle of wanting an update.
+    Write-Step "Checking for Git..."
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        Write-Ok "Found Git"
+    } else {
+        Write-Warn "Git is not installed. The server will still run, but update_packhouse_server.bat"
+        Write-Warn "cannot fetch updates without it. Get it from https://git-scm.com/download/win"
+    }
+
+    # Updates are signed-tag only (see update_packhouse_server.bat), so the update
+    # path needs a working gpg. Git for Windows bundles one, but it keeps keys
+    # in a keyboxd daemon the Git distribution does not ship, so it fails
+    # exactly like a bad signature does - which sends people looking for an
+    # attacker instead of an installer. Reject it by path, same as Boord does.
+    Write-Step "Checking for GnuPG (used to verify signed releases)..."
+    $gpgExe = $null
+    $gpgCmd = Get-Command gpg -ErrorAction SilentlyContinue
+    if ($gpgCmd -and $gpgCmd.Source -notlike "*\Git\usr\bin\*") {
+        $gpgExe = $gpgCmd.Source
+        Write-Ok "Found GnuPG at $gpgExe"
+    } else {
+        foreach ($candidate in @((Join-Path $env:ProgramFiles "GnuPG\bin\gpg.exe"),
+                                 (Join-Path ${env:ProgramFiles(x86)} "GnuPG\bin\gpg.exe"))) {
+            if ((Test-Path $candidate) -and -not $gpgExe) { $gpgExe = $candidate }
+        }
+        if ($gpgExe) {
+            Write-Ok "Found GnuPG at $gpgExe"
+        } else {
+            Write-Warn "GnuPG not found. The server runs fine without it, but"
+            Write-Warn "update_packhouse_server.bat cannot verify a release and will refuse to"
+            Write-Warn "install one. Boord's own install.bat installs Gpg4win and points git"
+            Write-Warn "at it - if this PC runs Boord, run that once and this is handled."
+            Write-Warn "Otherwise: https://gpg4win.org"
+        }
+    }
+
+    # Importing the public key from the repo is safe: what actually decides
+    # which releases are trusted is the fingerprint in data\release_key.fpr,
+    # which lives outside the repo. A swapped key would not match it and
+    # update_packhouse_server.bat would refuse the release.
+    if ($gpgExe -and (Test-Path $ReleaseKeyPath)) {
+        try {
+            # Not -Wait, and time-limited. GnuPG starts keyboxd and gpg-agent on
+            # its first run, and on a machine whose keyring has just been created
+            # that start-up can hang indefinitely with its output redirected into
+            # a non-interactive process. Importing the key is a convenience; it
+            # must never be able to block the install.
+            $gpgLog = Join-Path $env:TEMP "boord-packhouse-gpg-import.log"
+            $proc = Start-Process -FilePath $gpgExe `
+                -ArgumentList @("--batch", "--yes", "--import", $ReleaseKeyPath) `
+                -NoNewWindow -PassThru `
+                -RedirectStandardError $gpgLog -RedirectStandardOutput "$gpgLog.out"
+            try { $null = $proc.Handle } catch { }
+            if ($proc.WaitForExit(60000)) {
+                $exit = $null
+                try { $exit = $proc.ExitCode } catch { }
+                if ($exit -eq 0) { Write-Ok "Imported the release key" }
+                else { Write-Warn "Importing release-key.asc did not report success - see $gpgLog" }
+            } else {
+                try { $proc.Kill() } catch { }
+                Write-Warn "gpg did not finish within 60 seconds - skipped the key import."
+                Write-Warn "Run this once in a Command Prompt, which lets it finish:"
+                Write-Warn "    ""$gpgExe"" --import release-key.asc"
+            }
+            Remove-Item "$gpgLog.out" -ErrorAction SilentlyContinue
+        } catch {
+            Write-Warn "Could not import release-key.asc: $($_.Exception.Message)"
+        }
+    }
+
+    # --- Step 3: Locate Boord's database ---
+    Write-Step "Locating Boord's database (read-only access)..."
+    $boordDb = $null
+    if (Test-Path $DefaultBoordDb) {
+        $boordDb = (Resolve-Path $DefaultBoordDb).Path
+        Write-Ok "Found it at $boordDb"
+    }
+    while (-not $boordDb -or -not (Test-Path $boordDb)) {
+        Write-Warn "Could not find boord.db automatically."
+        $entered = Read-Host "Full path to Boord's data\boord.db (e.g. C:\Boord\data\boord.db)"
+        if ($entered -and (Test-Path $entered)) {
+            $boordDb = (Resolve-Path $entered).Path
+        } else {
+            Write-Err "No file at that path. Install Boord first, then re-run this."
+        }
+    }
+
+    # --- Step 4: Virtual environment ---
+    Write-Step "Setting up the app's virtual environment..."
+    if (-not (Test-Path $VenvDir)) { & $pythonExe -m venv $VenvDir; Write-Ok "Created virtual environment" }
+    else { Write-Ok "Virtual environment already exists" }
+    $venvPython = Join-Path $VenvDir "Scripts\python.exe"
+    # Deliberately NOT $VenvDir\Scripts\pip.exe. That is a launcher stub
+    # generated when the venv is created - a brand-new unsigned executable,
+    # which Windows Application Control (Smart App Control / WDAC / AppLocker)
+    # blocks outright on a machine that enforces one: "Program 'pip.exe'
+    # failed to run: An Application Control policy has blocked this file".
+    # The venv's python.exe is a COPY of the Python Software Foundation
+    # binary and keeps its Authenticode signature, so `python -m pip` runs
+    # where `pip.exe` cannot. Same pip, same result, one fewer unsigned
+    # binary - so this is the right call even where nothing is enforcing.
+
+    # --- Step 5: Dependencies ---
+    Write-Step "Installing app dependencies (first run can take a few minutes)..."
+    & $venvPython -m pip install --quiet --disable-pip-version-check -r (Join-Path $BackendDir "requirements.txt")
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "Dependency install failed."
+        Write-Err "Usually this is no internet, or pip being blocked by a proxy."
+        Write-Err "If the error above mentions an Application Control policy, this PC"
+        Write-Err "enforces one and has blocked a binary inside .venv. Nothing here"
+        Write-Err "needs the policy relaxed - tell whoever manages it which file was"
+        Write-Err "blocked. Re-running this installer is safe; it reuses the venv."
+        exit 1
+    }
+    Write-Ok "Dependencies installed"
+
+    # --- Step 6: Launcher ---
+    Write-Step "Creating the server launcher..."
+    # --host 127.0.0.1 is load-bearing, not a default. The packhouse screens
+    # have no login (who did what is a badge scan, not a password), so
+    # whoever can reach this port can use them. Binding loopback means the
+    # only way in is `tailscale serve`, which proxies to http://localhost:8060
+    # and is reachable inside the tailnet only. Widening this to 0.0.0.0
+    # publishes the packhouse to anyone on the farm's wifi.
+    #
+    # The launcher restarts the server itself, 15 seconds after it exits for
+    # any reason. The task's restart policy (Step 8) does not cover this:
+    # Task Scheduler only acts on a task that failed to launch, and this one
+    # always launches - it is the .bat that keeps running or ends. Without the
+    # loop, a server that died (a crash, Boord's database still locked at
+    # boot) stayed down until the watchdog's next pass, five or more minutes
+    # later, with the packhouse tablets cut off from the server. Ending the task
+    # (schtasks /end, stop_server.ps1, the updater) ends the loop with it.
+    #
+    # Everything the server prints goes to data\server.log, because a task
+    # running as SYSTEM has no window and the reason it died was otherwise
+    # lost every time. One old generation is kept, capped at 1 MB, so a
+    # server that crash-loops for weeks cannot fill the disk.
+    #
+    # Two small things that look odd and are load-bearing:
+    # - The wait is "ping", not "timeout": timeout refuses to run without a
+    #   console ("Input redirection is not supported") and returns at once,
+    #   which turns a broken server into a busy loop.
+    # - Each echo puts the redirect first. %time% ends in a digit, and a digit
+    #   right before the arrow is read as a handle number and eaten (see the
+    #   note in update_packhouse_server.bat).
+    $launcher = @"
+@echo off
+cd /d "$BackendDir"
+set "BOORD_DB_PATH=$boordDb"
+set "PYTHONUNBUFFERED=1"
+set "LOG=$DataDir\server.log"
+if not exist "$DataDir" mkdir "$DataDir"
+:loop
+if exist "%LOG%" for %%F in ("%LOG%") do if %%~zF GTR 1048576 move /y "%LOG%" "%LOG%.1" >nul
+>>"%LOG%" echo %date% %time%  Starting Boord Packhouse on port $Port
+"$venvPython" -m uvicorn main:app --host 127.0.0.1 --port $Port >>"%LOG%" 2>&1
+>>"%LOG%" echo %date% %time%  Server exited with code %errorlevel%; starting it again in 15 seconds
+ping -n 16 127.0.0.1 >nul
+goto loop
+"@
+    Set-Content -Path $LauncherPath -Value $launcher -Encoding ASCII
+    Write-Ok "Created $LauncherPath"
+
+    # --- Step 7: Firewall ---
+    # Nothing to open: the server listens on loopback only, so no inbound rule
+    # can reach it. This DELETES the rule older installers added - upgrading a
+    # server that already had port $Port open to the LAN has to close it, or
+    # the whole point of the loopback bind is lost on exactly the machines
+    # that have been running longest.
+    Write-Step "Closing the firewall port older versions opened..."
+    netsh advfirewall firewall delete rule name="$FirewallRuleName" | Out-Null
+    Write-Ok "Port $Port is not exposed to the network (reachable via Tailscale only)"
+
+    # --- Step 8: Scheduled task (auto-start at boot, runs as SYSTEM so it can
+    #     read boord.db and its -wal/-shm sidecars, same account as Boord's task) ---
+    Write-Step "Registering the server to start automatically with Windows..."
+    cmd /c "schtasks /query /tn ""$TaskName"" >nul 2>&1"
+    if ($LASTEXITCODE -eq 0) {
+        # stop_server.ps1, not a bare "schtasks /end": the uvicorn process
+        # outlives the launcher, and a re-install would then start the new
+        # launcher next to an old server still holding the port.
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot "stop_server.ps1") -Port $Port -TaskName $TaskName
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "The old server could not be stopped (see above). Restart the PC after this installer finishes."
+        }
+        schtasks /delete /tn "$TaskName" /f | Out-Null
+    }
+
+    # --- Step 8a: Keep Windows from taking port 8060 ---
+    # Hyper-V, WSL and Docker reserve blocks of ports at every boot, and the
+    # block moves from boot to boot. When it lands on 8060, uvicorn cannot
+    # bind ("An attempt was made to access a socket in a way forbidden by its
+    # access permissions") and the packhouse is down until a reboot that
+    # happens to reserve elsewhere - which looks exactly like a server that
+    # shuts off for no reason. Reserving the port for administrators keeps
+    # Windows from handing it out; programs can still listen on it. Done here
+    # because the server is stopped: netsh refuses a port that is in use.
+    Write-Step "Reserving port $Port so Windows cannot hand it to anything else..."
+    $reservedBy = $null
+    foreach ($line in (cmd /c "netsh int ipv4 show excludedportrange protocol=tcp 2>&1")) {
+        if ($line -match '^\s*(\d+)\s+(\d+)\s*(\*)?\s*$') {
+            if ([int]$matches[1] -le $Port -and $Port -le [int]$matches[2]) {
+                $reservedBy = if ($matches[3]) { "admin" } else { "windows" }
+            }
+        }
+    }
+    if ($reservedBy -eq "admin") {
+        Write-Ok "Port $Port is already reserved"
+    } elseif ($reservedBy -eq "windows") {
+        Write-Warn "Windows has reserved a range of ports that includes $Port this boot"
+        Write-Warn "(Hyper-V, WSL or Docker), so the server cannot start. To free it for good,"
+        Write-Warn "run these in an administrator window, then run install.bat again:"
+        Write-Warn "    net stop winnat"
+        Write-Warn "    netsh int ipv4 add excludedportrange protocol=tcp startport=$Port numberofports=1"
+        Write-Warn "    net start winnat"
+    } else {
+        $out = cmd /c "netsh int ipv4 add excludedportrange protocol=tcp startport=$Port numberofports=1 2>&1"
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok "Port $Port reserved"
+        } else {
+            Write-Warn "Could not reserve port $Port ($(($out | Out-String).Trim()))."
+            Write-Warn "The server still works; Windows may just take the port on some boots."
+        }
+    }
+    schtasks /create /tn "$TaskName" /tr "`"$LauncherPath`"" /sc onstart /ru SYSTEM /rl highest /f | Out-Null
+    # schtasks can't set these, so they are applied afterwards (as BoordOwner's
+    # installer does). The default execution time limit (72h) would otherwise
+    # stop the packhouse server three days after every boot - mid-shift, with the
+    # tablets quietly losing the server. And if the process dies
+    # (Boord's database not ready yet at boot, a crash), the task must start
+    # it again rather than leave the tablets offline until the next
+    # reboot. Best-effort: an old PowerShell without these cmdlets still gets
+    # the task itself.
+    try {
+        $taskSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) `
+            -RestartCount 10 -RestartInterval (New-TimeSpan -Minutes 1) `
+            -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+        Set-ScheduledTask -TaskName $TaskName -Settings $taskSettings | Out-Null
+        Write-Ok "Scheduled task '$TaskName' registered (runs at every startup, no one needs to log in, restarts itself if it stops)"
+    } catch {
+        Write-Warn "Task registered, but couldn't set its restart policy: $($_.Exception.Message)"
+    }
+
+    # --- Step 9: Start it now ---
+    Write-Step "Starting the server now..."
+    schtasks /run /tn "$TaskName" | Out-Null
+
+    # --- Step 10: Confirm it answers ---
+    # 45 seconds, not 20: startup waits up to 30 for Boord's database to be
+    # readable (main.BOORD_WAIT_S) before it gives up.
+    $serverUp = $false
+    for ($i = 0; $i -lt 45; $i++) {
+        Start-Sleep -Seconds 1
+        try {
+            $resp = Invoke-WebRequest -Uri "http://localhost:$Port/" -UseBasicParsing -TimeoutSec 3
+            if ($resp.StatusCode -eq 200) { $serverUp = $true; break }
+        } catch { }
+    }
+    if ($serverUp) { Write-Ok "Server is up and answering on port $Port" }
+    else {
+        Write-Warn "The server did not answer on port $Port within 45 seconds."
+        Write-Warn "Why is in $DataDir\server.log. The launcher keeps retrying"
+        Write-Warn "every 15 seconds, so it may still come up on its own."
+    }
+
+    # --- Step 11: Report the address and how to publish it ---
+    Write-Host ""
+    Write-Host "================================================" -ForegroundColor Cyan
+    Write-Host " Setup complete!" -ForegroundColor Green
+    Write-Host "================================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host " On this PC: http://localhost:$Port/"
+    Write-Host ""
+    Write-Host " From anywhere else, publish it over Tailscale:"
+    Write-Host ""
+    Write-Host "   `"C:\Program Files\Tailscale\tailscale.exe`" serve --bg --https=8060 http://localhost:$Port/" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host " It then answers at https://<machine>.<tailnet>.ts.net:8060/ for anyone"
+    Write-Host " on the tailnet, over HTTPS. There is no sign-in: being on the"
+    Write-Host " tailnet is the access control."
+    Write-Host ""
+    Write-Host " 8060, not 443, IF Boord runs on this machine too - Boord takes 443, and" -ForegroundColor Yellow
+    Write-Host " its Field QR scanner needs to be what the bare address reaches. Both" -ForegroundColor Yellow
+    Write-Host " apps claiming 443 is silent: the last command run wins and the other" -ForegroundColor Yellow
+    Write-Host " app answers {\"detail\":\"Not Found\"}, which looks like anything but a" -ForegroundColor Yellow
+    Write-Host " port clash. Check with: tailscale serve status" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Warn "Tailnet membership decides who can reach this app at all. Use 'serve',"
+    Write-Warn "NEVER 'funnel' - funnel would put the packhouse on the open internet"
+    Write-Warn "behind nothing. To revoke a departed person's device, remove it from"
+    Write-Warn "the Tailscale admin console."
+    Write-Host ""
+    Write-Host " The server will now start automatically every time this PC turns on."
+    Write-Host " update_packhouse_server.bat installs the newest SIGNED release and restarts it."
+
+    # --- Step 12: The trust root for updates ---
+    #
+    # Deliberately NOT written automatically. What this fingerprint decides is
+    # which code this machine will accept in future, and this installer came
+    # out of the very repository those updates come from - so a fingerprint it
+    # wrote for you would be the repo vouching for itself. Typing it is the one
+    # step that has to be a person's decision.
+    #
+    # Boord's own release_key.fpr is a different matter: it is outside both
+    # repos and a human already put it there, for the same publisher and the
+    # same key. Offering it saves the "where do I get the fingerprint" problem
+    # without making the choice for anybody.
+    if (-not (Test-Path $FprFile)) {
+        $boordFpr = $null
+        try {
+            $boordDataDir = Split-Path (Split-Path $boordDb -Parent) -Parent
+            $candidate = Join-Path $boordDataDir "data\release_key.fpr"
+            if (Test-Path $candidate) { $boordFpr = (Get-Content $candidate -TotalCount 1).Trim() }
+        } catch { }
+
+        Write-Host ""
+        Write-Host "================================================" -ForegroundColor Yellow
+        Write-Host " One step left: trust the release key" -ForegroundColor Yellow
+        Write-Host "================================================" -ForegroundColor Yellow
+        Write-Host " update_packhouse_server.bat will refuse to install anything until this"
+        Write-Host " server knows which signing key to trust. The server you just"
+        Write-Host " installed runs fine without this - only updates need it."
+        Write-Host ""
+        if ($boordFpr) {
+            Write-Host " Boord on this PC already trusts this key. Same publisher, same"
+            Write-Host " key - so in this folder, run:"
+            Write-Host ""
+            Write-Host "     >data\release_key.fpr echo $boordFpr" -ForegroundColor Cyan
+        } else {
+            Write-Host " In this folder, run:"
+            Write-Host ""
+            Write-Host "     >data\release_key.fpr echo <FINGERPRINT>" -ForegroundColor Cyan
+            Write-Host ""
+            Write-Host " ...with the 40-character fingerprint from whoever maintains this"
+            Write-Host " install."
+        }
+        Write-Host ""
+        Write-Warn "Type it with the redirect first, exactly as shown. cmd reads a digit"
+        Write-Warn "written immediately before a > as a file handle number, so the more"
+        Write-Warn "natural 'echo <FINGERPRINT>> file' drops the fingerprint's last"
+        Write-Warn "character whenever it is a digit - and the next update then fails its"
+        Write-Warn "signature check, which reads as tampering rather than as a typo."
+    } else {
+        $fpr = (Get-Content $FprFile -TotalCount 1).Trim()
+        Write-Ok "Release key fingerprint on file: $fpr"
+    }
+} catch {
+    Write-Host ""
+    Write-Err "Something went wrong:"
+    Write-Err $_.Exception.Message
+    exit 1
+}

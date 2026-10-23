@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Boord Packhouse</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Packhouse">
+<meta name="theme-color" content="#0A2F6B">
+<script src="shared/tailwind.js"></script>
+<link rel="stylesheet" href="shared/vendor/fontawesome/css/all.min.css">
+<link rel="stylesheet" href="shared/styles.css">
+<script src="shared/api.js"></script>
+</head>
+<body class="bg-slate-100 min-h-screen pb-6">
+
+<div class="boord-header p-3">
+  <div class="flex items-center justify-between max-w-4xl mx-auto gap-3">
+    <button id="homeBtn" class="hidden shrink-0 bg-white/20 rounded-xl px-4 py-3 text-lg font-bold">
+      <i class="fa-solid fa-house"></i> Home
+    </button>
+    <div class="flex-1 min-w-0">
+      <div class="font-bold text-lg truncate" id="title">Boord Packhouse</div>
+    </div>
+    <div id="appVersion" class="text-xs opacity-60 shrink-0"></div>
+  </div>
+</div>
+
+<main class="p-3 max-w-4xl mx-auto">
+
+  <!-- Home: one big tile per role, sized for wet hands and gloves. -->
+  <section id="home" class="grid grid-cols-2 md:grid-cols-3 gap-3"></section>
+
+  <!-- A role, full screen. Placeholder until its build stage lands. -->
+  <section id="module" class="hidden">
+    <div class="bg-white rounded-2xl shadow p-8 text-center">
+      <i id="moduleIcon" class="text-6xl" style="color: var(--boord-blue)"></i>
+      <div id="moduleName" class="text-2xl font-bold mt-4"></div>
+      <div id="moduleBlurb" class="text-slate-500 mt-2"></div>
+      <div class="inline-block mt-6 px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-sm font-semibold">
+        Not built yet
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
