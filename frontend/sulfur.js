@@ -1,5 +1,6 @@
-// The Sulfur tent role: badge scan, one card per tent, countdowns, the home
-// tile, the alarm, and Settings -> Tents.
+// The Sulfur tent role: badge scan, one card per tent with its suggested
+// time (suggest.js), countdowns, the home tile, the alarm, and Settings ->
+// Tents and Sulfur.
 //
 // Runs live in Store (sync.js): made here, queued on the tablet, sent when
 // the Wi-Fi allows. Every countdown is worked out on this tablet from the
@@ -120,6 +121,7 @@ function draftFor(tent) {
     const today = Store.sources().find((g) => g.label === "Today");
     drafts[tent.id] = {
       grams: tent.default_grams, minutes: tent.default_minutes, crates: tent.default_crates,
+      minutesTouched: false, // once the operator steps the time, the suggestion stops moving it
       // Pre-selected only when exactly one source came in today - with
       // several, the operator has to choose, so nobody starts on the wrong one.
       source: today && today.sources.length === 1 ? today.sources[0].key : "",
@@ -160,6 +162,7 @@ function idleCard(tent) {
           <div class="text-center text-2xl font-bold"><span data-minutes>${esc(d.minutes)}</span> min</div>
           <button type="button" data-step="5" class="keypad-btn font-bold">+5</button>
         </div>
+        <div data-suggestion class="mt-2 text-sm rounded-lg bg-sky-50 text-sky-900 p-2 hidden"></div>
       </div>
       <label class="block"><span class="text-xs text-slate-500">Fruit source</span>
         <select data-field="source" class="w-full border border-slate-300 rounded-lg p-3 text-lg bg-white">${sourceOptions(d.source)}</select></label>
@@ -200,6 +203,48 @@ function runningCard(tent, runs) {
     </div>`;
 }
 
+// The suggested time for a tent card's current inputs, or null until the
+// tablet has the settings. Worked out here, from cached settings, weather and
+// fruit sources, so it works with no Wi-Fi.
+function suggestionFor(tent, d) {
+  const settings = Store.sulfurSettings();
+  if (!settings) return null;
+  const source = findSource(d.source);
+  const weather = Store.weather();
+  const input = {
+    baseMinutes: tent.default_minutes, grams: Number(d.grams), crates: Number(d.crates) || 0,
+    crateKg: source ? source.crate_kg : null, variety: source ? source.variety : "",
+    temp: weather ? weather.temp : null, humidity: weather ? weather.humidity : null,
+  };
+  return { input, result: suggestMinutes(input, settings) };
+}
+
+// Updates each idle card's suggestion in place (never a rebuild, which would
+// wipe what is being typed). Until the operator steps the time, the time
+// follows the suggestion.
+function refreshSuggestions() {
+  document.querySelectorAll("#tentCards [data-tent]:not([data-running-card])").forEach((card) => {
+    const tent = Store.tents().find((t) => t.id === Number(card.dataset.tent));
+    const box = card.querySelector("[data-suggestion]");
+    if (!tent || !box) return;
+    const d = draftFor(tent);
+    const s = suggestionFor(tent, d);
+    box.classList.toggle("hidden", !s);
+    if (!s) return;
+    if (!d.minutesTouched) {
+      d.minutes = s.result.minutes;
+      card.querySelector("[data-minutes]").textContent = d.minutes;
+    }
+    const differs = Number(d.minutes) !== s.result.minutes;
+    box.innerHTML = `<div class="flex items-center justify-between gap-2">
+        <div><i class="fa-solid fa-calculator"></i> <b>Suggested: ${s.result.minutes} min</b></div>
+        ${differs ? `<button type="button" data-use-suggestion class="text-xs underline">Use ${s.result.minutes} min</button>` : ""}
+      </div>
+      <div class="text-xs opacity-80">${esc(describeSuggestion(tent.default_minutes, s.result))}${
+        Store.weather() ? "" : " · no recent weather"}${findSource(d.source) ? "" : " · choose the fruit for its weight and variety"}</div>`;
+  });
+}
+
 // Cards are rebuilt only when what they show changes, never by the 1-second
 // tick or a sync that brought nothing new - a rebuild would wipe whatever
 // the operator is typing.
@@ -226,6 +271,7 @@ function renderSulfur(force = false) {
     }).join("")
     : `<div class="bg-white rounded-2xl shadow p-6 text-center text-slate-500">No tents yet - add them in Settings &rarr; Tents.
        ${navigator.onLine ? "" : "<br>This tablet has not reached the server yet."}</div>`;
+  refreshSuggestions();
   tick();
 }
 
@@ -242,6 +288,7 @@ async function startRun(card) {
   if (!(grams > 0)) return Boord.toast("Enter the grams of sulfur");
   if (!(Number.isInteger(crates) && crates >= 1)) return Boord.toast("Enter the number of crates");
   if (!source) return Boord.toast("Choose the fruit source");
+  const s = suggestionFor(tent, d);
   await Store.saveRun({
     uuid: Boord.uuid(), tent_id: tent.id, tent_name: tent.name,
     grams, minutes, crates,
@@ -249,6 +296,9 @@ async function startRun(card) {
     supplier_id: source.supplier_id ?? null, supplier_name: source.supplier_name || "",
     started_at: new Date(Store.now()).toISOString(), started_by: op.id, started_by_name: op.name,
     ended_at: null, ended_by: "", ended_by_name: "",
+    // Kept beside the minutes chosen, to tune Settings -> Sulfur later.
+    suggested_minutes: s ? s.result.minutes : null, fruit_kg: s ? s.result.fruitKg : null,
+    suggestion_temp: s ? s.input.temp : null, suggestion_humidity: s ? s.input.humidity : null,
   });
   delete drafts[tent.id];
   Boord.beepSaved();
@@ -268,7 +318,11 @@ function onSulfurInput(ev) {
   Operator.touch();
   const card = ev.target.closest("[data-tent]");
   const field = ev.target.dataset.field;
-  if (card && field) draftFor(Store.tents().find((t) => t.id === Number(card.dataset.tent)) || {})[field] = ev.target.value;
+  const tent = card && Store.tents().find((t) => t.id === Number(card.dataset.tent));
+  if (tent && field) {
+    draftFor(tent)[field] = ev.target.value;
+    refreshSuggestions();
+  }
 }
 
 function onSulfurClick(ev) {
@@ -278,7 +332,14 @@ function onSulfurClick(ev) {
   if (step && card) {
     const d = draftFor(Store.tents().find((t) => t.id === Number(card.dataset.tent)));
     d.minutes = Math.min(600, Math.max(5, Number(d.minutes) + Number(step.dataset.step)));
+    d.minutesTouched = true;
     card.querySelector("[data-minutes]").textContent = d.minutes;
+    refreshSuggestions();
+    return;
+  }
+  if (ev.target.closest("[data-use-suggestion]") && card) {
+    drafts[Number(card.dataset.tent)].minutesTouched = false;
+    refreshSuggestions();
     return;
   }
   if (ev.target.closest("[data-start]") && card) { startRun(card); return; }
@@ -423,6 +484,73 @@ async function saveTent(ev) {
   }
 }
 
+// --------------------------------------------------------------------------
+// Settings -> Sulfur: the numbers behind the suggested time.
+// --------------------------------------------------------------------------
+const SULFUR_FIELDS = [
+  ["Reference conditions - a tent's default time applies to exactly these", null],
+  ["ref_grams", "Sulfur (g)"], ["ref_crates", "Crates"], ["ref_crate_kg", "Crate weight (kg)"],
+  ["ref_temp", "Temperature (°C)"], ["ref_humidity", "Humidity (%)"],
+  ["Weather", null],
+  ["temp_pct_per_deg", "% shorter per °C hotter"], ["humidity_pct_per_pct", "% longer per % more humid"],
+  ["Limits", null],
+  ["min_minutes", "Shortest (min)"], ["max_minutes", "Longest (min)"], ["round_to", "Round to (min)"],
+];
+
+async function loadSulfurSettings() {
+  let data;
+  try {
+    data = await Boord.api("/api/settings/sulfur");
+  } catch (e) {
+    if (e.status === 401) { unlocked = false; show(); }
+    else $("sulfurSettingsForm").innerHTML = `<div class="text-sm text-slate-500">These can only be changed while the server can be reached.</div>`;
+    return;
+  }
+  const s = data.settings;
+  const factors = JSON.parse(s.variety_factors || "{}");
+  const varieties = [...new Set([...data.varieties, ...Object.keys(factors)])];
+  let html = "";
+  let open = false;
+  for (const [key, label] of SULFUR_FIELDS) {
+    if (label === null) {
+      if (open) html += `</div></div>`;
+      html += `<div class="bg-white rounded-2xl shadow p-4"><div class="font-semibold mb-2">${esc(key)}</div><div class="grid grid-cols-2 md:grid-cols-3 gap-2">`;
+      open = true;
+    } else {
+      html += `<label class="block"><span class="text-xs text-slate-500">${esc(label)}</span>
+        <input name="${key}" type="number" step="any" inputmode="decimal" value="${esc(s[key])}" class="w-full border border-slate-300 rounded-lg p-2"></label>`;
+    }
+  }
+  html += `</div></div>
+    <div class="bg-white rounded-2xl shadow p-4">
+      <div class="font-semibold">Varieties</div>
+      <div class="text-xs text-slate-500 mb-2">Times the time by this: 1.0 means no change, 0.9 is 10% shorter. From the blocks in Boord.</div>
+      <div class="grid grid-cols-2 gap-2">${varieties.map((v) => `
+        <label class="block"><span class="text-xs text-slate-500">${esc(v)}</span>
+          <input data-variety="${esc(v)}" type="number" step="0.05" min="0.05" inputmode="decimal" value="${esc(factors[v] ?? 1)}"
+                 class="w-full border border-slate-300 rounded-lg p-2"></label>`).join("") || `<div class="text-sm text-slate-400">No varieties on Boord's blocks yet.</div>`}
+      </div>
+    </div>
+    <button class="w-full boord-btn-primary rounded-lg py-3 font-semibold">Save</button>`;
+  $("sulfurSettingsForm").innerHTML = html;
+}
+
+async function saveSulfurSettings(ev) {
+  ev.preventDefault();
+  const form = $("sulfurSettingsForm");
+  const body = { variety_factors: {} };
+  for (const [key, label] of SULFUR_FIELDS) if (label !== null) body[key] = Number(form.elements[key].value);
+  form.querySelectorAll("[data-variety]").forEach((el) => { body.variety_factors[el.dataset.variety] = Number(el.value); });
+  try {
+    await Boord.api("/api/settings/sulfur", { method: "PUT", body });
+    Boord.toast("Sulfur settings saved");
+    Store.syncNow(); // the tablets pick them up on their next sync
+  } catch (e) {
+    if (e.status === 401) { unlocked = false; show(); return; }
+    Boord.toast(Boord.errorDetail(e, "No connection to the server"));
+  }
+}
+
 function initSulfur() {
   $("scanBtn").addEventListener("click", startCamera);
   $("scanCancel").addEventListener("click", stopCamera);
@@ -430,7 +558,8 @@ function initSulfur() {
   $("tentCards").addEventListener("input", onSulfurInput);
   $("tentCards").addEventListener("change", onSulfurInput);
   $("tentSettings").addEventListener("submit", saveTent);
-  Store.onChange(() => renderSulfur());
+  Store.onChange(() => { renderSulfur(); refreshSuggestions(); });
+  $("sulfurSettingsForm").addEventListener("submit", saveSulfurSettings);
   // A browser refuses to play sound until the page has been touched. Make
   // the audio context on the first touch, so the alarm can sound later.
   document.addEventListener("pointerdown", () => {

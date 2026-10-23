@@ -1,8 +1,8 @@
 // Keeping the tablet working through patchy Wi-Fi.
 //
 // - What the screens need is cached in localStorage and refreshed whenever
-//   the server answers: Boord's workers (badge scan), tents, fruit sources
-//   and the server's list of sulfur runs.
+//   the server answers: Boord's workers (badge scan), tents, fruit sources,
+//   the suggested-time settings, the weather and the server's sulfur runs.
 // - Runs made on this tablet go to the IndexedDB outbox (idb.js) and are
 //   sent by syncNow() every SYNC_EVERY_MS, and at once after any change.
 // - The tablet's clock is corrected from the server's (server_now in every
@@ -93,6 +93,7 @@ const Store = (() => {
       keep("ph_server_runs", runs.runs);
       keep("ph_tents", await Boord.api("/api/tents"));
       keep("ph_sources", await Boord.api("/api/fruit-sources"));
+      keep("ph_sulfur_settings", await Boord.api("/api/sulfur/settings"));
       if (Date.now() - lastWorkers > WORKERS_EVERY_MS) await refreshWorkers();
       const left = (await IDB.pending().catch(() => [])).length;
       setPill(left ? "pending" : "synced", left ? `Syncing ${left}...` : "Online - synced");
@@ -122,6 +123,14 @@ const Store = (() => {
     workers: () => cached("ph_workers", []),
     tents: () => cached("ph_tents", []),
     sources: () => cached("ph_sources", []),
+    sulfurSettings: () => cached("ph_sulfur_settings", null),
+    // The header's last farm weather (app.js), if it is recent enough to
+    // base a suggested time on.
+    weather() {
+      const w = cached("ph_weather", null);
+      return w && Date.now() - w.at < 3 * 3600 * 1000 ? w : null;
+    },
+    keepWeather: (w) => keep("ph_weather", { temp: w.temp, humidity: w.humidity, at: Date.now() }),
     refreshWorkers: () => refreshWorkers().catch(() => {}),
     syncNow,
 

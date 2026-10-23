@@ -157,6 +157,7 @@ async function runBackupNow() {
 const SETTINGS_PAGES = [
   { id: "packhouse", name: "Packhouse", icon: "fa-sliders" },
   { id: "tents",     name: "Tents",     icon: "fa-tent",       load: loadTentSettings },
+  { id: "sulfur",    name: "Sulfur",    icon: "fa-calculator", load: loadSulfurSettings },
   { id: "backup",    name: "Backup",    icon: "fa-database",   load: loadBackupsList },
   { id: "pin",       name: "PIN",       icon: "fa-key" },
 ];
@@ -221,6 +222,7 @@ async function updateWeather() {
     if (w && w.no_location) {
       $("headerWeather").innerHTML = `<i class="fa-solid fa-location-dot"></i> Set pack house location in Boord Settings`;
     } else if (w && w.temp != null) {
+      Store.keepWeather(w); // the sulfur screen's suggested time uses it, offline too
       $("headerWeather").innerHTML = `<i class="fa-solid ${Boord.weatherIcon(w.condition)}"></i> ${Math.round(w.temp)}°C`
         + `${w.condition ? ` · ${esc(w.condition)}` : ""}${w.humidity != null ? ` · ${Math.round(w.humidity)}% humidity` : ""}`;
     }

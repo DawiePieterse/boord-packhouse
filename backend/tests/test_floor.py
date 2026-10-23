@@ -16,7 +16,8 @@ def test_fruit_sources_today_then_the_last_previous_day(client):
     assert today["block:15"]["crates"] == 3 and today["block:15"]["variety"] == "Early Delight"
     assert today["block:8a"]["crates"] == 1
     assert today["supplier:2"] == {"key": "supplier:2", "supplier_id": 2,
-                                   "supplier_name": "Jansen Boerdery", "crates": 40}
+                                   "supplier_name": "Jansen Boerdery", "crates": 40, "crate_kg": 19.0}
+    assert today["block:15"]["crate_kg"] == 20.0
     assert [s["key"] for s in groups[1]["sources"]] == ["block:7"]
     # The lot still on the truck is not received fruit.
     assert all(s["crates"] < 9 or s["key"] == "supplier:2" for s in groups[0]["sources"])

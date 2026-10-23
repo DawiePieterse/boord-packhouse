@@ -58,3 +58,40 @@ class SulfurRun(SQLModel, table=True):
     weather_humidity: Optional[float] = None
     device: str = ""
     synced_at: Optional[datetime] = None
+    # The suggested time and what went into it (frontend/suggest.js), kept
+    # beside the minutes actually chosen so a season of runs can be used to
+    # tune SulfurSettings - or replace it with a fitted model.
+    suggested_minutes: Optional[int] = None
+    fruit_kg: Optional[float] = None
+    suggestion_temp: Optional[float] = None
+    suggestion_humidity: Optional[float] = None
+
+
+class SulfurSettings(SQLModel, table=True):
+    """Settings -> Sulfur: the numbers behind the suggested time. One row.
+
+    There is no published formula for litchi sulfur time, so this is a
+    transparent starting rule the farm tunes, not a calculation from first
+    principles. A tent's default minutes is its time at these reference
+    conditions; frontend/suggest.js scales it by:
+      - fruit per gram of sulfur, against ref_crates x ref_crate_kg per ref_grams
+        (more SO2 per kg of fruit -> shorter);
+      - weather: temp_pct_per_deg % shorter per degree above ref_temp, and
+        humidity_pct_per_pct % longer per % humidity above ref_humidity
+        (hot and dry raises residue);
+      - the variety's factor (McLean's Red takes up more than Mauritius);
+    then rounds to round_to and keeps it within min/max_minutes. Zero
+    percentages and factors of 1.0 make the suggestion the plain tent default.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ref_grams: float = 425.0
+    ref_crates: int = 24
+    ref_crate_kg: float = 20.0  # the farm: "crates are about 20kg"
+    ref_temp: float = 25.0
+    ref_humidity: float = 60.0
+    temp_pct_per_deg: float = 2.0
+    humidity_pct_per_pct: float = 0.5
+    min_minutes: int = 30
+    max_minutes: int = 120
+    round_to: int = 5
+    variety_factors: str = '{"Mauritius": 1.0, "McLean\'s Red": 0.9}'  # JSON: variety -> factor

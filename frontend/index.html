@@ -18,6 +18,7 @@
 <script src="shared/vendor/html5-qrcode.min.js"></script>
 <script src="idb.js"></script>
 <script src="sync.js"></script>
+<script src="suggest.js"></script>
 <script src="sulfur.js"></script>
 </head>
 <body class="bg-slate-100 min-h-screen pb-20">
@@ -97,6 +98,11 @@
     <div data-settings-page="tents" class="space-y-3">
       <div class="text-sm text-slate-500 px-1">The tents on the sulfur screen, and what each one starts with. A tent that is no longer used is switched off, never deleted, so its past runs keep its name.</div>
       <div id="tentSettings" class="space-y-3"></div>
+    </div>
+
+    <div data-settings-page="sulfur" class="space-y-3">
+      <div class="text-sm text-slate-500 px-1">The numbers behind the suggested time on each tent card. There is no published formula for litchi sulfur time, so these are a starting rule to tune: the operator always sees the reasons and can change the time. Set both percentages to 0 and every variety to 1.0 to suggest each tent's own default time.</div>
+      <form id="sulfurSettingsForm" class="space-y-3"></form>
     </div>
 
     <div data-settings-page="backup" class="space-y-3">

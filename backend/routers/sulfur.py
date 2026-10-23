@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends
 from sqlmodel import Session, SQLModel, or_, select
 
 from db import get_packhouse_session
-from models import SulfurRun, Tent
+from models import SulfurRun, SulfurSettings, Tent
 from routers.weather import farm_weather
 
 router = APIRouter(prefix="/api/sulfur", tags=["sulfur"])
@@ -61,6 +61,10 @@ class RunIn(SQLModel):
     ended_at: Optional[datetime] = None
     ended_by: str = ""
     ended_by_name: str = ""
+    suggested_minutes: Optional[int] = None
+    fruit_kg: Optional[float] = None
+    suggestion_temp: Optional[float] = None
+    suggestion_humidity: Optional[float] = None
 
 
 class SyncIn(SQLModel):
@@ -117,6 +121,13 @@ def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
         synced.append(run.uuid)
     session.commit()
     return {"server_now": _iso(now), "synced": synced, "rejected": rejected}
+
+
+@router.get("/settings")
+def get_settings(session: Session = Depends(get_packhouse_session)):
+    """The suggested-time numbers. Open: every tablet caches them, so the
+    suggestion still works with no Wi-Fi. Changed in Settings (tents.py)."""
+    return session.get(SulfurSettings, 1)
 
 
 @router.get("/runs")
