@@ -9,7 +9,9 @@
 // The tent's default minutes is its time at the reference conditions. It is
 // scaled, one step at a time so each step can be shown, by:
 //   1. fruit per gram of sulfur, against the reference pallet - more fruit
-//      for the same sulfur means less SO2 per kg, so longer;
+//      for the same sulfur means less SO2 per kg, so longer. The fruit is
+//      crates x the packhouse crate weight in Settings (~20 kg): Boord's
+//      crate weights are field picking crates (~7 kg) and must not be used;
 //   2. the weather - hot and dry raises residue, so shorter;
 //   3. the variety's factor - McLean's Red takes up more than Mauritius;
 // then rounded and kept between the minimum and maximum.
@@ -33,8 +35,7 @@ function suggestMinutes(input, settings) {
   };
 
   // 1. Fruit per gram of sulfur.
-  const crateKg = input.crateKg > 0 ? input.crateKg : s.ref_crate_kg;
-  const fruitKg = input.crates * crateKg;
+  const fruitKg = input.crates * s.ref_crate_kg;
   const refKgPerGram = (s.ref_crates * s.ref_crate_kg) / s.ref_grams;
   if (input.grams > 0) {
     const factor = (fruitKg / input.grams) / refKgPerGram;

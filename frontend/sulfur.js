@@ -148,7 +148,7 @@ function sourceOptions(selected) {
   if (!groups.length) return `<option value="">No fruit received today or on the last receiving day</option>`;
   return `<option value="">Choose the fruit...</option>` + groups.map((g) =>
     `<optgroup label="${esc(g.label)}">` + g.sources.map((s) =>
-      `<option value="${esc(s.key)}"${s.key === selected ? " selected" : ""}>${esc(sourceLabel(s))} (${s.crates} crates)</option>`).join("")
+      `<option value="${esc(s.key)}"${s.key === selected ? " selected" : ""}>${esc(sourceLabel(s))} (${s.crates} field crates)</option>`).join("")
     + `</optgroup>`).join("");
 }
 
@@ -181,7 +181,7 @@ function idleCard(tent) {
       <label class="block"><span class="text-xs text-slate-500">Fruit source</span>
         <select data-field="source" class="w-full border border-slate-300 rounded-lg p-3 text-lg bg-white">${sourceOptions(d.source)}</select></label>
       <button type="button" data-start class="w-full boord-btn-primary rounded-xl py-4 text-xl font-bold">
-        <i class="fa-solid fa-play"></i> Start</button>
+        <i class="fa-solid fa-play"></i> Start · <span data-start-minutes>${esc(d.minutes)}</span> min</button>
     </div>`;
 }
 
@@ -228,10 +228,17 @@ function suggestionFor(tent, d) {
   const weather = Store.weather();
   const input = {
     baseMinutes: tent.default_minutes, grams: Number(d.grams), crates: Number(d.crates) || 0,
-    crateKg: source ? source.crate_kg : null, variety: source ? source.variety : "",
+    variety: source ? source.variety : "",
     temp: weather ? weather.temp : null, humidity: weather ? weather.humidity : null,
   };
   return { input, result: suggestMinutes(input, settings) };
+}
+
+// The time on a card shows in two places - the stepper and the Start button,
+// so the time a run will get is the one on the button that starts it.
+function showMinutes(card, minutes) {
+  card.querySelector("[data-minutes]").textContent = minutes;
+  card.querySelector("[data-start-minutes]").textContent = minutes;
 }
 
 // The aril SO2 line: the estimate for the time and grams on the card now,
@@ -271,7 +278,7 @@ function refreshSuggestions() {
     if (!s) return;
     if (!d.minutesTouched) {
       d.minutes = s.result.minutes;
-      card.querySelector("[data-minutes]").textContent = d.minutes;
+      showMinutes(card, d.minutes);
     }
     const differs = Number(d.minutes) !== s.result.minutes;
     box.innerHTML = `<div class="flex items-center justify-between gap-2">
@@ -279,7 +286,7 @@ function refreshSuggestions() {
         ${differs ? `<button type="button" data-use-suggestion class="text-xs underline">Use ${s.result.minutes} min</button>` : ""}
       </div>
       <div class="text-xs opacity-80">${esc(describeSuggestion(tent.default_minutes, s.result))}${
-        Store.weather() ? "" : " · no recent weather"}${findSource(d.source) ? "" : " · choose the fruit for its weight and variety"}</div>`;
+        Store.weather() ? "" : " · no recent weather"}${findSource(d.source) ? "" : " · choose the fruit for its variety"}</div>`;
     showResidue(card, d.minutes, s);
   });
 }
@@ -373,7 +380,7 @@ function onSulfurClick(ev) {
     const d = draftFor(Store.tents().find((t) => t.id === Number(card.dataset.tent)));
     d.minutes = Math.min(600, Math.max(5, Number(d.minutes) + Number(step.dataset.step)));
     d.minutesTouched = true;
-    card.querySelector("[data-minutes]").textContent = d.minutes;
+    showMinutes(card, d.minutes);
     refreshSuggestions();
     return;
   }

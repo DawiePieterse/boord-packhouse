@@ -9,7 +9,7 @@ const settings = {
   variety_factors: '{"Mauritius": 1.0, "McLean\'s Red": 0.9}',
   residue_ref_ppm: 5, residue_limit_ppm: 10, residue_warn_ppm: 8,
 };
-const load = { baseMinutes: 60, grams: 425, crates: 24, crateKg: 20, variety: "Mauritius", temp: 25, humidity: 60 };
+const load = { baseMinutes: 60, grams: 425, crates: 24, variety: "Mauritius", temp: 25, humidity: 60 };
 
 // The reference load gets the tent's default, with nothing to explain.
 let r = suggestMinutes(load, settings);
@@ -31,8 +31,8 @@ r = suggestMinutes({ ...load, variety: "mclean's red" }, settings);
 assert.strictEqual(r.minutes, 55);
 assert.strictEqual(describeSuggestion(60, r), "60 base · −6 McLean's Red");
 
-// Unknown crate weight or variety, no weather: the reference values, no steps.
-r = suggestMinutes({ ...load, crateKg: null, variety: "Bought-in", temp: null, humidity: null }, settings);
+// A full pallet of an unknown variety with no weather: the reference values, no steps.
+r = suggestMinutes({ ...load, variety: "Bought-in", temp: null, humidity: null }, settings);
 assert.strictEqual(r.minutes, 60);
 assert.deepStrictEqual(r.steps, []);
 

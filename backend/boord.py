@@ -19,8 +19,8 @@ BOORD_SCHEMA_CHECK = {
     "worker": "id, first_name, last_name, name, photo_filename, active",
     "block": "id, name, variety",
     "supplier": "id, name, is_own_farm",
-    "lot": "id, supplier_id, total_crates, total_kg, status, received_at",
-    "harvestrecord": "lot_id, block_id, weight_kg",
+    "lot": "id, supplier_id, total_crates, status, received_at",
+    "harvestrecord": "lot_id, block_id",
 }
 
 # How far back to look for "the last previous receiving day". Off-season
@@ -50,21 +50,21 @@ def fruit_sources(now: Optional[datetime] = None) -> list:
 
         [{"date": "2026-10-23", "label": "Today", "sources": [
             {"key": "block:15", "block_id": "15", "block_name": "Block 15",
-             "variety": "Early Delight", "crates": 120, "crate_kg": 12.4},
+             "variety": "Early Delight", "crates": 120},
             {"key": "supplier:2", "supplier_id": 2, "supplier_name": "Jansen Boerdery",
-             "crates": 80, "crate_kg": 13.0}]}, ...]
+             "crates": 80}]}, ...]
 
     Days are farm-local calendar days. Own-farm blocks come from the crates'
     harvest records; another farmer's lot has none, so it is offered by
-    supplier. crate_kg is the average crate weight of that fruit (the field
-    scale's weights for a block; lot kg / crates for another farmer), or None
-    when Boord has no weights - the suggested time uses it for the fruit mass.
+    supplier. Crates are Boord's field picking crates (about 7 kg on the
+    farm), not the ~20 kg packhouse crates that go into a tent, so no weight
+    is offered here: the suggested time uses Settings -> Sulfur's crate weight.
     """
     now = timeutil.as_utc(now or datetime.now(timezone.utc))
     since = (now - timedelta(days=LOOKBACK_DAYS)).replace(tzinfo=None)
     with boord_engine.connect() as conn:
         lots = conn.execute(text(
-            "SELECT lot.id, lot.supplier_id, lot.total_crates, lot.total_kg, lot.received_at, "
+            "SELECT lot.id, lot.supplier_id, lot.total_crates, lot.received_at, "
             "supplier.name AS supplier_name, supplier.is_own_farm "
             "FROM lot LEFT JOIN supplier ON supplier.id = lot.supplier_id "
             "WHERE lot.received_at IS NOT NULL AND lot.received_at >= :since "
@@ -91,8 +91,7 @@ def fruit_sources(now: Optional[datetime] = None) -> list:
                 params = {f"l{i}": lot_id for i, lot_id in enumerate(own)}
                 placeholders = ", ".join(f":{k}" for k in params)
                 for b in conn.execute(text(
-                        "SELECT harvestrecord.block_id, block.name, block.variety, COUNT(*) AS crates, "
-                        "AVG(harvestrecord.weight_kg) AS crate_kg "
+                        "SELECT harvestrecord.block_id, block.name, block.variety, COUNT(*) AS crates "
                         "FROM harvestrecord LEFT JOIN block ON block.id = harvestrecord.block_id "
                         f"WHERE harvestrecord.lot_id IN ({placeholders}) "
                         "AND harvestrecord.block_id IS NOT NULL "
@@ -100,19 +99,14 @@ def fruit_sources(now: Optional[datetime] = None) -> list:
                         "ORDER BY harvestrecord.block_id"), params).all():
                     sources.append({"key": f"block:{b.block_id}", "block_id": b.block_id,
                                     "block_name": b.name or f"Block {b.block_id}",
-                                    "variety": b.variety or "", "crates": b.crates,
-                                    "crate_kg": round(b.crate_kg, 2) if b.crate_kg else None})
+                                    "variety": b.variety or "", "crates": b.crates})
             others = {}
             for l in by_day[day]:
                 if l.supplier_id is not None and not l.is_own_farm:
                     entry = others.setdefault(l.supplier_id, {
                         "key": f"supplier:{l.supplier_id}", "supplier_id": l.supplier_id,
-                        "supplier_name": l.supplier_name or f"Supplier {l.supplier_id}", "crates": 0, "kg": 0.0})
+                        "supplier_name": l.supplier_name or f"Supplier {l.supplier_id}", "crates": 0})
                     entry["crates"] += l.total_crates or 0
-                    entry["kg"] += l.total_kg or 0.0
-            for entry in others.values():
-                kg = entry.pop("kg")
-                entry["crate_kg"] = round(kg / entry["crates"], 2) if kg and entry["crates"] else None
             sources += sorted(others.values(), key=lambda s: s["supplier_name"])
             label = "Today" if day == today else day.strftime("%a %d %b").replace(" 0", " ")
             groups.append({"date": day.isoformat(), "label": label, "sources": sources})

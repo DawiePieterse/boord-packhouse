@@ -35,8 +35,8 @@ def _build_fake_boord_db():
         CREATE TABLE block (id TEXT PRIMARY KEY, name TEXT, variety TEXT);
         CREATE TABLE supplier (id INTEGER PRIMARY KEY, name TEXT, is_own_farm BOOLEAN);
         CREATE TABLE lot (id INTEGER PRIMARY KEY, supplier_id INTEGER, total_crates INTEGER,
-                          total_kg FLOAT, status TEXT, received_at DATETIME);
-        CREATE TABLE harvestrecord (uuid TEXT PRIMARY KEY, lot_id INTEGER, block_id TEXT, weight_kg FLOAT);
+                          status TEXT, received_at DATETIME);
+        CREATE TABLE harvestrecord (uuid TEXT PRIMARY KEY, lot_id INTEGER, block_id TEXT);
         INSERT INTO worker VALUES ('001', 'Thandi', 'M', 'Thandi M', '', 1),
                                   ('002', 'Piet', 'K', '', '002.jpg', 1),
                                   ('003', '', '', 'Gone', '', 0);
@@ -44,15 +44,13 @@ def _build_fake_boord_db():
                                  ('7', 'Block 7', 'Early Delight'), ('9', 'Block 9', 'Early Delight');
         INSERT INTO supplier VALUES (1, 'Own fruit', 1), (2, 'Jansen Boerdery', 0);
     """)
-    lots = [(1, 1, 4, 80.0, "received", _utc(0)), (2, 2, 40, 760.0, "received", _utc(0)),
-            (3, 1, 2, 40.0, "received", _utc(2)), (4, 1, 1, 20.0, "received", _utc(5)),
-            (5, 1, 9, 180.0, "in_transit", None)]
-    con.executemany("INSERT INTO lot VALUES (?, ?, ?, ?, ?, ?)", lots)
+    lots = [(1, 1, 4, "received", _utc(0)), (2, 2, 40, "received", _utc(0)),
+            (3, 1, 2, "received", _utc(2)), (4, 1, 1, "received", _utc(5)),
+            (5, 1, 9, "in_transit", None)]
+    con.executemany("INSERT INTO lot VALUES (?, ?, ?, ?, ?)", lots)
     crates = [("15", 1)] * 3 + [("8a", 1)] + [("7", 3)] * 2 + [("9", 4)] + [("15", 5)] * 9
-    # Block 15's three crates weigh 19, 20 and 21 kg: 20 on average.
-    weights = {0: 19.0, 1: 20.0, 2: 21.0}
-    con.executemany("INSERT INTO harvestrecord VALUES (?, ?, ?, ?)",
-                    [(f"h{i}", lot, block, weights.get(i, 18.0)) for i, (block, lot) in enumerate(crates)])
+    con.executemany("INSERT INTO harvestrecord VALUES (?, ?, ?)",
+                    [(f"h{i}", lot, block) for i, (block, lot) in enumerate(crates)])
     con.commit()
     con.close()
 
