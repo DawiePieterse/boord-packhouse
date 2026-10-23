@@ -1,7 +1,8 @@
 // Boord Packhouse - the home screen of big icons, one per role. Any tablet
-// can open any role; tapping one opens it full screen, and the Home button
-// always comes back. The role is in the URL hash (#sulfur), so the
-// browser's own back button works too.
+// can open any role; tapping one opens it full screen, and Home in the
+// bottom menu always comes back. Settings, also in the bottom menu, asks for
+// the 4-digit PIN. The screen is in the URL hash (#sulfur, #settings), so
+// the browser's own back button works too.
 //
 // Every role is a placeholder for now. Each one is built in its own stage
 // of Boord_Packhouse_App_Plan.md ("Build stages").
@@ -28,17 +29,97 @@ function renderHome() {
     </a>`).join("");
 }
 
+// --------------------------------------------------------------------------
+// Settings PIN. The tablets are shared, so Settings is signed out the moment
+// it is left (or sits untouched for SETTINGS_IDLE_MS) - the next person to
+// tap Settings types the PIN again. The server enforces it either way:
+// every settings endpoint answers 401 without the cookie (admin_auth.py).
+// --------------------------------------------------------------------------
+const PIN_LENGTH = 4;
+const SETTINGS_IDLE_MS = 5 * 60 * 1000;
+let unlocked = false;
+let pinEntry = "";
+let idleTimer = null;
+
+function renderPinPad() {
+  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "del"];
+  $("pinPad").innerHTML = keys.map((k) => k === ""
+    ? "<div></div>"
+    : `<button type="button" data-key="${k}" class="keypad-btn text-2xl py-4 font-semibold">${
+        k === "del" ? '<i class="fa-solid fa-delete-left"></i>' : k}</button>`).join("");
+  $("pinPad").onclick = (ev) => {
+    const btn = ev.target.closest("button[data-key]");
+    if (btn) pressKey(btn.dataset.key);
+  };
+}
+
+function renderPinDots() {
+  $("pinDots").innerHTML = Array.from({ length: PIN_LENGTH }, (_, i) =>
+    `<span class="w-4 h-4 rounded-full border-2" style="border-color: var(--boord-blue);${
+      i < pinEntry.length ? " background: var(--boord-blue);" : ""}"></span>`).join("");
+}
+
+async function pressKey(key) {
+  if (key === "del") pinEntry = pinEntry.slice(0, -1);
+  else if (pinEntry.length < PIN_LENGTH) pinEntry += key;
+  $("pinError").textContent = "";
+  renderPinDots();
+  if (pinEntry.length < PIN_LENGTH) return;
+  const pin = pinEntry;
+  pinEntry = "";
+  try {
+    await Boord.api("/api/admin/login", { method: "POST", body: { pin } });
+    unlocked = true;
+    show();
+  } catch (e) {
+    renderPinDots();
+    $("pinError").textContent = Boord.errorDetail(e, "No connection to the server");
+  }
+}
+
+function lockSettings() {
+  clearTimeout(idleTimer);
+  if (!unlocked) return;
+  unlocked = false;
+  Boord.api("/api/admin/logout", { method: "POST" }).catch(() => {});
+}
+
+function touchSettings() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => { if (location.hash === "#settings") location.hash = ""; }, SETTINGS_IDLE_MS);
+}
+
+async function changePin(ev) {
+  ev.preventDefault();
+  try {
+    await Boord.api("/api/admin/pin", { method: "POST", body: { current: $("pinCurrent").value, new: $("pinNew").value } });
+    $("pinCurrent").value = $("pinNew").value = "";
+    Boord.toast("PIN changed - other tablets need the new one");
+  } catch (e) {
+    if (e.status === 401) { unlocked = false; show(); return; }
+    Boord.toast(Boord.errorDetail(e, "No connection to the server"));
+  }
+}
+
+// --------------------------------------------------------------------------
+// Which screen. The hash decides: "" home, #<module>, #settings.
+// --------------------------------------------------------------------------
 function show() {
-  const m = MODULES.find((x) => `#${x.id}` === location.hash);
-  $("home").classList.toggle("hidden", !!m);
-  $("module").classList.toggle("hidden", !m);
-  $("homeBtn").classList.toggle("hidden", !m);
-  $("title").textContent = m ? m.name : "Boord Packhouse";
+  const hash = location.hash;
+  if (hash !== "#settings") lockSettings();
+  const m = MODULES.find((x) => `#${x.id}` === hash);
+  const view = hash === "#settings" ? (unlocked ? "settings" : "pin") : m ? "module" : "home";
+  for (const id of ["home", "module", "pin", "settings"]) $(id).classList.toggle("hidden", id !== view);
+  $("title").textContent = m ? m.name : hash === "#settings" ? "Settings" : "Boord Packhouse";
   if (m) {
     $("moduleIcon").className = `fa-solid ${m.icon} text-6xl`;
     $("moduleName").textContent = m.name;
     $("moduleBlurb").textContent = m.blurb;
   }
+  if (view === "pin") { pinEntry = ""; $("pinError").textContent = ""; renderPinDots(); }
+  if (view === "settings") touchSettings();
+  document.querySelectorAll("[data-nav]").forEach((a) =>
+    a.classList.toggle("tab-active", a.dataset.nav === (hash === "#settings" ? "settings" : "home")));
   window.scrollTo(0, 0);
 }
 
@@ -94,7 +175,13 @@ Boord.boot(() => {
   updateWeather();
   setInterval(updateWeather, WEATHER_INTERVAL_MS);
   renderHome();
-  $("homeBtn").onclick = () => { location.hash = ""; };
+  renderPinPad();
+  // Never inherit a sign-in: a tablet reloaded (or an installed app reopened)
+  // may still hold the session cookie, and the next person must type the PIN.
+  Boord.api("/api/admin/logout", { method: "POST" }).catch(() => {});
+  $("pinChangeForm").addEventListener("submit", changePin);
+  $("settings").addEventListener("pointerdown", touchSettings);
+  $("settings").addEventListener("input", touchSettings);
   window.addEventListener("hashchange", show);
   show();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("service-worker.js").catch(() => {});

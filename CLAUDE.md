@@ -10,7 +10,13 @@ Boord Packhouse covers everything that happens to fruit after Boord Receiving ch
 - its own SQLite `data/packhouse.db`;
 - Boord's `boord.db` opened **read-only** (not wired yet: the first module that needs lots or workers adds it, copying Labour's `boord_engine` and `_BOORD_SCHEMA_CHECK`).
 
-Access is Tailscale only. The floor screens have no login; who did what will be a Boord badge scan. Office-only actions (corrections, overrides, settings) will sit behind an admin PIN copied from Labour's `admin_auth.py` when they arrive.
+Access has two layers:
+- **Tailscale** gets you to the app at all. It binds 127.0.0.1; never bind 0.0.0.0.
+- **The 4-digit settings PIN** separates Settings (and later corrections and overrides) from the floor screens, which have no login; who did what will be a Boord badge scan.
+  - **Every settings endpoint must depend on `admin_auth.require_admin`**, which checks the `packhouse_admin` cookie. The floor endpoints (`/api/version`, `/api/weather/current`) stay open.
+  - The PIN is exactly 4 digits, pbkdf2-hashed in `data/admin_pin.txt`, and set only from the server console (`backend/set_pin.py`, also run by `install.ps1`), never via the web. Five wrong tries lock it for 5 minutes.
+  - Unlike Labour's admin phone, the tablets are shared: the cookie is a session cookie, and `app.js` signs out when Settings is left, after 5 idle minutes, and on every page load.
+  - In tests, use the `admin_client` fixture for settings endpoints. The TestClient runs on https because the cookie is Secure.
 
 ## The Boord suite
 
@@ -62,7 +68,7 @@ Keep code Python 3.9-compatible: no `X | None`, no `match`.
 
 ## Architecture
 
-- **Home screen** (`frontend/index.html`, `app.js`): a grid of big icons, one per role (`MODULES` in app.js). A role opens full screen at `#<id>`, and the Home button goes back. Every role is a placeholder until its build stage lands.
+- **Home screen** (`frontend/index.html`, `app.js`): a grid of big icons, one per role (`MODULES` in app.js). A role opens full screen at `#<id>`. The bottom menu has Home and Settings (`#settings`, behind the PIN keypad). Every role is a placeholder until its build stage lands.
 - **Header:** the weather strip comes from `GET /api/weather/current`, which passes Boord's own `/api/weather/current` through from `BOORD_URL` (default `http://127.0.0.1:8000`). Boord owns the source (iWeathar station or GPS in Boord's Settings) and its cache; an unreachable Boord is `{}`, never an error. The sync pill uses Field's colours; today it only probes `/api/version`, and gains the outbox count when the first module queues records.
 - **Schema:** `db.init_packhouse_db()` creates `_PACKHOUSE_TABLES` and runs at startup and in the updater. It is empty today. Add Alembic (copy Boord's setup) with the first table, as the plan asks.
 - **Frontend:** a single vanilla-JS PWA, no build step. `frontend/shared/` (api.js, sw-core.js, styles.css, tailwind.js, vendor/) is vendored from Boord via Labour. Only `VERSION` in api.js is ours. Bump `CACHE` in `service-worker.js` when shell files change.

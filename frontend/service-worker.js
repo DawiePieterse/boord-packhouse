@@ -1,6 +1,6 @@
 // App-shell cache so the tablets still open the app with no signal.
 const CACHE_PREFIX = "boord-packhouse-";
-const CACHE = "boord-packhouse-v2";
+const CACHE = "boord-packhouse-v3";
 const SHELL = [
   "./",
   "./index.html",

@@ -3,18 +3,21 @@ Receiving checks a load in, up to the truck.
 
 One `uvicorn main:app` process beside Boord on the farm server. The
 installer binds the port to 127.0.0.1, so only the tailnet that
-`tailscale serve` publishes it to can reach it at all.
+`tailscale serve` publishes it to can reach it at all. On top of that,
+Settings needs the 4-digit PIN (admin_auth.require_admin), because every
+floor tablet is on the tailnet too. Every settings endpoint must depend on
+require_admin.
 """
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 import config
 from db import init_packhouse_db
-from routers import version, weather
+from routers import admin, version, weather
 
 app = FastAPI(title="Boord Packhouse")
 
-for module in (version, weather):
+for module in (admin, version, weather):
     app.include_router(module.router)
 
 

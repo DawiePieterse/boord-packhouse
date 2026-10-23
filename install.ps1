@@ -198,11 +198,30 @@ try {
     }
     Write-Ok "Dependencies installed"
 
+    # --- Step 5b: Settings PIN ---
+    # Settings sit behind this 4-digit PIN; the floor screens never need it.
+    # Set here, at the server, because the web page deliberately cannot set
+    # the first one (backend/admin_auth.py). A re-run keeps the existing
+    # PIN - backend\set_pin.py changes it.
+    if (-not (Test-Path (Join-Path $DataDir "admin_pin.txt"))) {
+        Write-Step "Choose the 4-digit settings PIN..."
+        Push-Location $BackendDir
+        & $venvPython set_pin.py
+        Pop-Location
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "No PIN was set. Settings stay locked until you run, in the backend folder:"
+            Write-Warn "    .venv\Scripts\python set_pin.py"
+        }
+    } else {
+        Write-Ok "Settings PIN already set (backend\set_pin.py changes it)"
+    }
+
     # --- Step 6: Launcher ---
     Write-Step "Creating the server launcher..."
-    # --host 127.0.0.1 is load-bearing, not a default. The packhouse screens
-    # have no login (who did what is a badge scan, not a password), so
-    # whoever can reach this port can use them. Binding loopback means the
+    # --host 127.0.0.1 is load-bearing, not a default. The packhouse floor
+    # screens have no login (who did what is a badge scan, not a password),
+    # so whoever can reach this port can use them; only Settings asks for
+    # the 4-digit PIN. Binding loopback means the
     # only way in is `tailscale serve`, which proxies to http://localhost:8060
     # and is reachable inside the tailnet only. Widening this to 0.0.0.0
     # publishes the packhouse to anyone on the farm's wifi.
@@ -361,8 +380,8 @@ goto loop
     Write-Host "   `"C:\Program Files\Tailscale\tailscale.exe`" serve --bg --https=8060 http://localhost:$Port/" -ForegroundColor Yellow
     Write-Host ""
     Write-Host " It then answers at https://<machine>.<tailnet>.ts.net:8060/ for anyone"
-    Write-Host " on the tailnet, over HTTPS. There is no sign-in: being on the"
-    Write-Host " tailnet is the access control."
+    Write-Host " on the tailnet, over HTTPS. The floor screens need no sign-in;"
+    Write-Host " Settings asks for the 4-digit PIN."
     Write-Host ""
     Write-Host " 8060, not 443, IF Boord runs on this machine too - Boord takes 443, and" -ForegroundColor Yellow
     Write-Host " its Field QR scanner needs to be what the bare address reaches. Both" -ForegroundColor Yellow
@@ -373,7 +392,7 @@ goto loop
     Write-Warn "Tailnet membership decides who can reach this app at all. Use 'serve',"
     Write-Warn "NEVER 'funnel' - funnel would put the packhouse on the open internet"
     Write-Warn "behind nothing. To revoke a departed person's device, remove it from"
-    Write-Warn "the Tailscale admin console."
+    Write-Warn "the Tailscale admin console, and change the settings PIN (set_pin.py)."
     Write-Host ""
     Write-Host " The server will now start automatically every time this PC turns on."
     Write-Host " update_packhouse_server.bat installs the newest SIGNED release and restarts it."
