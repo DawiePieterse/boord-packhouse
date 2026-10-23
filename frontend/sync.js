@@ -76,7 +76,9 @@ const Store = (() => {
   // The server's list with this tablet's own copies merged in, the local
   // copy winning where it has got further (not sent yet, or ended here).
   function merged(serverRows, kind) {
-    const all = new Map(serverRows.map((r) => [r.uuid, r]));
+    // Tag server rows with their kind: one ended here is re-queued from this
+    // copy, and without a kind it would go to the sulfur endpoint and fail.
+    const all = new Map(serverRows.map((r) => [r.uuid, { ...r, kind }]));
     for (const r of localRuns.values()) {
       if ((r.kind || "") !== kind) continue;
       const server = all.get(r.uuid);
