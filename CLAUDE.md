@@ -63,6 +63,7 @@ Keep code Python 3.9-compatible: no `X | None`, no `match`.
 ## Architecture
 
 - **Home screen** (`frontend/index.html`, `app.js`): a grid of big icons, one per role (`MODULES` in app.js). A role opens full screen at `#<id>`, and the Home button goes back. Every role is a placeholder until its build stage lands.
+- **Header:** the weather strip comes from `GET /api/weather/current`, which passes Boord's own `/api/weather/current` through from `BOORD_URL` (default `http://127.0.0.1:8000`). Boord owns the source (iWeathar station or GPS in Boord's Settings) and its cache; an unreachable Boord is `{}`, never an error. The sync pill uses Field's colours; today it only probes `/api/version`, and gains the outbox count when the first module queues records.
 - **Schema:** `db.init_packhouse_db()` creates `_PACKHOUSE_TABLES` and runs at startup and in the updater. It is empty today. Add Alembic (copy Boord's setup) with the first table, as the plan asks.
 - **Frontend:** a single vanilla-JS PWA, no build step. `frontend/shared/` (api.js, sw-core.js, styles.css, tailwind.js, vendor/) is vendored from Boord via Labour. Only `VERSION` in api.js is ours. Bump `CACHE` in `service-worker.js` when shell files change.
 - **Icon:** Boord's crate with an orange leaf (`#fb923c`), rendered with `../Boord/scripts/render_icons.py`'s `render()`.

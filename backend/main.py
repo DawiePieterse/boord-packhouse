@@ -10,11 +10,12 @@ from fastapi.staticfiles import StaticFiles
 
 import config
 from db import init_packhouse_db
-from routers import version
+from routers import version, weather
 
 app = FastAPI(title="Boord Packhouse")
 
-app.include_router(version.router)
+for module in (version, weather):
+    app.include_router(module.router)
 
 
 @app.on_event("startup")

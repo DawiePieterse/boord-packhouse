@@ -42,9 +42,57 @@ function show() {
   window.scrollTo(0, 0);
 }
 
+// Header pill, the same colours as Field's so it reads the same at arm's
+// length: green = online and synced, amber = pending, red = offline.
+function setSyncStatus(state, text) {
+  const el = $("syncStatus");
+  el.textContent = text;
+  el.classList.remove("bg-white/20", "bg-green-600", "bg-amber-400", "text-slate-900", "bg-red-600");
+  if (state === "synced") el.classList.add("bg-green-600");
+  else if (state === "pending") el.classList.add("bg-amber-400", "text-slate-900");
+  else if (state === "offline") el.classList.add("bg-red-600");
+  else el.classList.add("bg-white/20");
+}
+
+// Nothing is queued on the tablet yet, so "synced" just means the server
+// answered. ponytail: add the outbox count ("Syncing 3...", "Offline - 3
+// pending") when the first module gets an IndexedDB outbox, as Field does.
+const PROBE_INTERVAL_MS = 15000;
+async function checkServer() {
+  try {
+    await Boord.api("/api/version", { timeoutMs: 5000 });
+    setSyncStatus("synced", "Online - synced");
+  } catch (e) {
+    setSyncStatus("offline", "Offline");
+  }
+}
+
+// Same strip as Boord Admin's header. Boord owns the weather source; this
+// server passes it through (backend/routers/weather.py).
+const WEATHER_INTERVAL_MS = 10 * 60 * 1000;
+async function updateWeather() {
+  try {
+    const w = await Boord.api("/api/weather/current");
+    if (w && w.no_location) {
+      $("headerWeather").innerHTML = `<i class="fa-solid fa-location-dot"></i> Set pack house location in Boord Settings`;
+    } else if (w && w.temp != null) {
+      $("headerWeather").innerHTML = `<i class="fa-solid ${Boord.weatherIcon(w.condition)}"></i> ${Math.round(w.temp)}°C`
+        + `${w.condition ? ` · ${esc(w.condition)}` : ""}${w.humidity != null ? ` · ${Math.round(w.humidity)}% humidity` : ""}`;
+    }
+  } catch (e) {
+    // weather is a nice-to-have - keep the last reading, never error the header
+  }
+}
+
 Boord.boot(() => {
   $("appVersion").textContent = `v${Boord.VERSION}`;
   Boord.offlineBanner("No connection to the server");
+  checkServer();
+  setInterval(checkServer, PROBE_INTERVAL_MS);
+  window.addEventListener("online", checkServer);
+  window.addEventListener("offline", () => setSyncStatus("offline", "Offline"));
+  updateWeather();
+  setInterval(updateWeather, WEATHER_INTERVAL_MS);
   renderHome();
   $("homeBtn").onclick = () => { location.hash = ""; };
   window.addEventListener("hashchange", show);

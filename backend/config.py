@@ -26,6 +26,12 @@ PACKHOUSE_DB_PATH = os.environ.get("PACKHOUSE_DB_PATH", os.path.join(DATA_DIR, "
 BOORD_DB_PATH = os.path.abspath(os.environ.get(
     "BOORD_DB_PATH", os.path.join(REPO_ROOT, "..", "Boord", "data", "boord.db")))
 
+# Boord's own server, asked over localhost for the farm's live weather (its
+# /api/weather/current reads the on-farm station or GPS from Boord's
+# Settings). This is one app asking another a question, the way Owner asks
+# Notes - not a second copy of the station scraper.
+BOORD_URL = (os.environ.get("BOORD_URL") or "http://127.0.0.1:8000").strip().rstrip("/")
+
 # Clear of Boord 8000, Owner 8010, Notes 8020, Kudde 8030, Labour 8040,
 # Monitor 8050.
 #
