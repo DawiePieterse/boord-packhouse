@@ -124,14 +124,14 @@ function dipBlock(b, several) {
 
 function dryBlock(b) {
   return `
-    <div class="flex items-center gap-3 border-t pt-3">
-      <div class="flex-1 text-sm text-slate-600">
+    <div data-dry-block class="space-y-2 rounded-xl border-2 p-3 bg-green-100 border-green-400">
+      <div class="text-sm text-slate-700">
         <div><b>Drying</b> <span data-acid-countdown="${esc(b.uuid)}" class="font-mono font-bold"></span>
           <span data-acid-label="${esc(b.uuid)}"></span></div>
         ${batchLine(b)}
       </div>
-      <button type="button" data-dry-done="${esc(b.uuid)}" class="border border-slate-300 rounded-xl px-4 py-3 font-semibold">
-        <i class="fa-solid fa-check"></i> Dry</button>
+      <button type="button" data-dry-done="${esc(b.uuid)}" class="w-full boord-btn-primary rounded-xl py-4 text-xl font-bold">
+        <i class="fa-solid fa-check"></i> Dry - ready to pack</button>
     </div>`;
 }
 
@@ -312,6 +312,10 @@ function acidTick() {
       el.textContent = left > 0 ? fmtClock(left) : "";
       label.textContent = left > 0 ? "left" : "- dry, ready to pack";
       label.classList.toggle("text-green-700", left <= 0);
+      // Green while inside the drying time, amber with a red edge once past it.
+      const block = el.closest("[data-dry-block]");
+      for (const c of ["bg-green-100", "border-green-400"]) block.classList.toggle(c, left > 0);
+      for (const c of ["bg-amber-200", "border-red-500"]) block.classList.toggle(c, left <= 0);
     }
   }
   acidTileStatus();
