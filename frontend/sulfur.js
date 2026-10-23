@@ -386,7 +386,7 @@ function homeTileStatus() {
   el.innerHTML = runs.length ? runs.map((r) => {
     const left = endsAt(r) - now;
     return left > 0
-      ? `<div class="text-sm font-semibold text-slate-700">${esc(r.tent_name)}: ${Math.ceil(left / 60000)} min left</div>`
+      ? `<div class="text-sm font-semibold text-green-700">${esc(r.tent_name)}: ${Math.ceil(left / 60000)} min left</div>`
       : `<div class="text-sm font-bold text-red-600">${esc(r.tent_name)}: +${Math.floor(-left / 60000)} min over</div>`;
   }).join("") : `<div class="text-xs text-slate-400 mt-1">No tents running</div>`;
 }
