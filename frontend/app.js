@@ -1,8 +1,9 @@
 // Boord Packhouse - the home screen of big icons, one per role. Any tablet
 // can open any role; tapping one opens it full screen, and Home in the
 // bottom menu always comes back. Settings, also in the bottom menu, asks for
-// the 4-digit PIN. The screen is in the URL hash (#sulfur, #settings), so
-// the browser's own back button works too.
+// the 4-digit PIN and has a bottom menu of its own. The screen is in the URL
+// hash (#sulfur, #settings/backup), so the browser's own back button works
+// too.
 //
 // Every role is a placeholder for now. Each one is built in its own stage
 // of Boord_Packhouse_App_Plan.md ("Build stages").
@@ -86,7 +87,7 @@ function lockSettings() {
 
 function touchSettings() {
   clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => { if (location.hash === "#settings") location.hash = ""; }, SETTINGS_IDLE_MS);
+  idleTimer = setTimeout(() => { if (location.hash.startsWith("#settings")) location.hash = ""; }, SETTINGS_IDLE_MS);
 }
 
 async function changePin(ev) {
@@ -149,24 +150,57 @@ async function runBackupNow() {
 }
 
 // --------------------------------------------------------------------------
-// Which screen. The hash decides: "" home, #<module>, #settings.
+// Settings pages, one button each in the settings bottom menu. To add one:
+// an entry here and a <div data-settings-page="<id>"> in index.html. `load`
+// runs each time the page opens.
+// --------------------------------------------------------------------------
+const SETTINGS_PAGES = [
+  { id: "packhouse", name: "Packhouse", icon: "fa-sliders" },
+  { id: "backup",    name: "Backup",    icon: "fa-database",   load: loadBackupsList },
+  { id: "pin",       name: "PIN",       icon: "fa-key" },
+];
+
+function renderSettingsNav() {
+  const nav = $("settingsNav");
+  nav.style.gridTemplateColumns = `repeat(${SETTINGS_PAGES.length + 1}, minmax(0, 1fr))`;
+  nav.innerHTML = `<a href="#" class="py-2 text-center text-sm"><i class="fa-solid fa-house text-2xl block"></i>Home</a>`
+    + SETTINGS_PAGES.map((p) => `<a href="#settings/${p.id}" data-settings-nav="${p.id}" class="py-2 text-center text-sm">`
+      + `<i class="fa-solid ${p.icon} text-2xl block"></i>${esc(p.name)}</a>`).join("");
+}
+
+// --------------------------------------------------------------------------
+// Which screen. The hash decides: "" home, #<module>, #settings[/<page>].
 // --------------------------------------------------------------------------
 function show() {
   const hash = location.hash;
-  if (hash !== "#settings") lockSettings();
+  const inSettings = hash === "#settings" || hash.startsWith("#settings/");
+  if (!inSettings) lockSettings();
   const m = MODULES.find((x) => `#${x.id}` === hash);
-  const view = hash === "#settings" ? (unlocked ? "settings" : "pin") : m ? "module" : "home";
+  const view = inSettings ? (unlocked ? "settings" : "pin") : m ? "module" : "home";
   for (const id of ["home", "module", "pin", "settings"]) $(id).classList.toggle("hidden", id !== view);
-  $("title").textContent = m ? m.name : hash === "#settings" ? "Settings" : "Boord Packhouse";
+  // The settings menu replaces the main one only once the PIN is in; the
+  // PIN pad keeps the main menu so Home is one tap away.
+  $("mainNav").classList.toggle("hidden", view === "settings");
+  $("settingsNav").classList.toggle("hidden", view !== "settings");
+
+  const page = SETTINGS_PAGES.find((p) => hash === `#settings/${p.id}`) || SETTINGS_PAGES[0];
+  $("title").textContent = m ? m.name : view === "settings" ? `Settings · ${page.name}` : inSettings ? "Settings" : "Boord Packhouse";
   if (m) {
     $("moduleIcon").className = `fa-solid ${m.icon} text-6xl`;
     $("moduleName").textContent = m.name;
     $("moduleBlurb").textContent = m.blurb;
   }
   if (view === "pin") { pinEntry = ""; $("pinError").textContent = ""; renderPinDots(); }
-  if (view === "settings") { touchSettings(); loadBackupsList(); }
+  if (view === "settings") {
+    touchSettings();
+    document.querySelectorAll("[data-settings-page]").forEach((el) =>
+      el.classList.toggle("hidden", el.dataset.settingsPage !== page.id));
+    document.querySelectorAll("[data-settings-nav]").forEach((a) =>
+      a.classList.toggle("tab-active", a.dataset.settingsNav === page.id));
+    if (page.load) page.load();
+  }
   document.querySelectorAll("[data-nav]").forEach((a) =>
-    a.classList.toggle("tab-active", a.dataset.nav === (hash === "#settings" ? "settings" : "home")));
+    a.classList.toggle("tab-active", a.dataset.nav === (inSettings ? "settings" : "home")));
   window.scrollTo(0, 0);
 }
 
@@ -223,6 +257,7 @@ Boord.boot(() => {
   setInterval(updateWeather, WEATHER_INTERVAL_MS);
   renderHome();
   renderPinPad();
+  renderSettingsNav();
   // Never inherit a sign-in: a tablet reloaded (or an installed app reopened)
   // may still hold the session cookie, and the next person must type the PIN.
   Boord.api("/api/admin/logout", { method: "POST" }).catch(() => {});
