@@ -10,6 +10,7 @@ const IDB = (() => {
   const STORE = "runs";
   // The server has a synced run; a few days here is only so this tablet's
   // own runs still show while the server can't be reached.
+  // acid.py's USED_RUNS_WINDOW is a day longer than this: change them together.
   const PRUNE_AFTER_DAYS = 3;
   let dbPromise = null;
 

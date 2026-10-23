@@ -86,3 +86,10 @@ def test_runs_lists_running_and_recently_finished(client):
          run("done-today", started=now - timedelta(hours=2), ended_at=_iso(now)))
     uuids = {r["uuid"] for r in client.get("/api/sulfur/runs").json()["runs"]}
     assert uuids == {"running-long", "done-today"}
+
+
+def test_an_end_before_the_start_is_kept_at_the_start(client):
+    now = datetime.now(timezone.utc)
+    sync(client, run(started=now, ended_at=_iso(now - timedelta(seconds=30)), ended_by="002"))
+    r = client.get("/api/sulfur/runs").json()["runs"][0]
+    assert r["ended_at"] == r["started_at"] and r["ended_by"] == "002"

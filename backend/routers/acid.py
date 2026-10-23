@@ -6,19 +6,24 @@ it lands. Sync is an idempotent upsert by uuid. A batch moves one way only,
 dipping -> drying -> done: the first dip_ended_at and ended_at the server
 sees stand. Changes and checks are never edited once in.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends
-from sqlmodel import Session, SQLModel, or_, select
+from sqlmodel import Session, SQLModel, func, or_, select
 
 from db import get_packhouse_session
 from models import AcidBatch, Bath, BathCheck, ChemicalChange
-from routers.sulfur import RECENT, _iso, _now, _utc_naive
+from routers.sulfur import RECENT, _iso, _now, _utc_naive, advance
 
 router = APIRouter(prefix="/api/acid", tags=["acid"])
 
 ROUTES = ("export", "local")
+# A tablet keeps its own sulfur runs for 3 days (idb.js PRUNE_AFTER_DAYS) and
+# offers any finished one not yet dipped. /state names every run dipped in
+# this window - a day more than the tablets keep - so a run dipped on another
+# tablet, or in a bath since retired, is never offered twice.
+USED_RUNS_WINDOW = timedelta(days=4)
 
 
 class BatchIn(SQLModel):
@@ -99,37 +104,30 @@ def out(row) -> dict:
     return o
 
 
-def _times(rec, *keys) -> dict:
-    return {k: _utc_naive(getattr(rec, k)) for k in keys}
-
-
 @router.post("/sync")
 def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
     now = _now()
     synced, rejected = [], []
-    kinds = ((AcidBatch, body.batches, ("started_at", "dip_ended_at", "ended_at")),
-             (ChemicalChange, body.changes, ("changed_at",)),
-             (BathCheck, body.checks, ("checked_at",)))
-    for model, records, time_keys in kinds:
+    # Each kind: its model, its records, and the time fields a batch moves
+    # through after it starts (changes and checks are never edited once in).
+    kinds = ((AcidBatch, body.batches, ("dip_ended_at", "ended_at")),
+             (ChemicalChange, body.changes, ()),
+             (BathCheck, body.checks, ()))
+    for model, records, stages in kinds:
         for rec in records:
             problem = _problem(rec, session)
             if problem:
                 rejected.append({"uuid": rec.uuid, "error": problem})
                 continue
-            times = _times(rec, *time_keys)
-            existing = session.get(model, rec.uuid)
-            if existing is None:
-                session.add(model(**rec.model_dump(exclude=set(time_keys)), **times,
-                                  device=body.device, synced_at=now))
-            elif model is AcidBatch:
-                # One way: a stage, once ended, stays ended as first sent.
-                if existing.dip_ended_at is None and times["dip_ended_at"] is not None:
-                    existing.dip_ended_at = times["dip_ended_at"]
-                    existing.dip_ended_by, existing.dip_ended_by_name = rec.dip_ended_by, rec.dip_ended_by_name
-                if existing.ended_at is None and times["ended_at"] is not None:
-                    existing.ended_at = times["ended_at"]
-                    existing.ended_by, existing.ended_by_name = rec.ended_by, rec.ended_by_name
-                session.add(existing)
+            row = session.get(model, rec.uuid)
+            if row is None:
+                fields = rec.model_dump(exclude=set(stages))
+                for key, value in fields.items():
+                    if isinstance(value, datetime):
+                        fields[key] = _utc_naive(value)
+                row = model(**fields, device=body.device, synced_at=now)
+            advance(row, rec, stages)
+            session.add(row)
             synced.append(rec.uuid)
     session.commit()
     return {"server_now": _iso(now), "synced": synced, "rejected": rejected}
@@ -137,25 +135,35 @@ def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
 
 @router.get("/state")
 def state(session: Session = Depends(get_packhouse_session)):
-    """What the acid screen needs per active bath: its latest chemical change
-    and concentration check, and every batch since that change (or still
-    going, or from the last RECENT) - the tablet adds up bath health from
-    these and its own unsent records."""
+    """What the acid screen needs: per active bath, its latest chemical change
+    and concentration check and the crates through it since that change
+    (`health`, added up here so no tablet needs the bath's history); the
+    batches still going or from the last RECENT; and every sulfur run dipped
+    lately (`used_runs`). The tablet adds its own unsent records on top.
+
+    Bounded on purpose: a bath with no change ever logged once sent every
+    batch it had had, and the tablets re-read that list every second."""
     now = _now()
-    batches, changes, checks = [], [], []
+    changes, checks, health = [], [], []
+    active = select(Bath.id).where(Bath.active == True)  # noqa: E712
     for bath in session.exec(select(Bath).where(Bath.active == True)).all():  # noqa: E712
         change = session.exec(select(ChemicalChange).where(ChemicalChange.bath_id == bath.id)
                               .order_by(ChemicalChange.changed_at.desc())).first()
         check = session.exec(select(BathCheck).where(BathCheck.bath_id == bath.id)
                              .order_by(BathCheck.checked_at.desc())).first()
-        q = select(AcidBatch).where(AcidBatch.bath_id == bath.id)
-        # ponytail: a bath with no change ever logged sends its whole history;
-        # bounded from the first Chemicals changed on.
+        q = select(func.coalesce(func.sum(AcidBatch.crates), 0)).where(AcidBatch.bath_id == bath.id)
         if change is not None:
-            since = min(now - RECENT, change.changed_at)
-            q = q.where(or_(AcidBatch.ended_at == None, AcidBatch.started_at >= since))  # noqa: E711
-        batches += session.exec(q.order_by(AcidBatch.started_at)).all()
+            q = q.where(AcidBatch.started_at >= change.changed_at)
+        health.append({"bath_id": bath.id, "crates": session.exec(q).one(),
+                       "change_uuid": change.uuid if change else None})
         changes += [change] if change else []
         checks += [check] if check else []
+    batches = session.exec(select(AcidBatch).where(
+        AcidBatch.bath_id.in_(active),
+        or_(AcidBatch.ended_at == None, AcidBatch.started_at >= now - RECENT))  # noqa: E711
+        .order_by(AcidBatch.started_at)).all()
+    used = session.exec(select(AcidBatch.sulfur_run_uuid).distinct().where(
+        AcidBatch.sulfur_run_uuid != None, AcidBatch.started_at >= now - USED_RUNS_WINDOW)).all()  # noqa: E711
     return {"server_now": _iso(now), "batches": [out(b) for b in batches],
-            "changes": [out(c) for c in changes], "checks": [out(c) for c in checks]}
+            "changes": [out(c) for c in changes], "checks": [out(c) for c in checks],
+            "health": health, "used_runs": sorted(used)}
