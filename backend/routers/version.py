@@ -46,8 +46,8 @@ def _git(args: list) -> str:
 
 @router.get("")
 def get_version():
-    """Same field names as Boord's /api/version, because Boord's
-    heartbeat.ps1 reads tag/state/frontend_version from every app."""
+    """Same field names as Boord's /api/version, because Boord Monitor
+    and its heartbeat.ps1 read tag/state/frontend_version from every app."""
     tag = _git(["describe", "--tags", "--exact-match"])
     if tag:
         state = "release"
