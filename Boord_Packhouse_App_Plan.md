@@ -150,7 +150,7 @@ Any tablet can open any role, so the app needs some other way to know who is wor
 | --- | --- | --- |
 | Boord | Retire the pre-pack pull at receiving (`PrePackRecord`, `/api/processing/prepack`) | The PDF puts the pre-pack decision after grading, not at the gate |
 | Boord | Stop using `LotStatus.processing_complete`, or leave it unused | Packhouse owns everything after receiving; Boord doesn't need to know |
-| Boord | Add Packhouse 8060 to the Tailscale port table in MANUAL.md, `watchdog.ps1` and `heartbeat.ps1` | That's where the suite's app list lives |
+| Boord | Add Packhouse 8060 to the Tailscale port table in MANUAL.md | Done. The app list itself is Boord Monitor's `apps.json` since its 2.0, where Packhouse is listed |
 | Boord | Root page: admin devices also offer "Packhouse" | One address to find every app |
 | Boord Owner | Read `packhouse.db` read-only: packout per route, tonnes per market, PPECB pass rate | The owner's whole-season view |
 | Boord Labour | Nothing required. Later, it could link worked hours to the stations people scanned into | Labour cost per station |
