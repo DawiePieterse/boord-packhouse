@@ -15,6 +15,10 @@
 <link rel="stylesheet" href="shared/vendor/fontawesome/css/all.min.css">
 <link rel="stylesheet" href="shared/styles.css">
 <script src="shared/api.js"></script>
+<script src="shared/vendor/html5-qrcode.min.js"></script>
+<script src="idb.js"></script>
+<script src="sync.js"></script>
+<script src="sulfur.js"></script>
 </head>
 <body class="bg-slate-100 min-h-screen pb-20">
 
@@ -48,6 +52,25 @@
     </div>
   </section>
 
+  <!-- Badge scan: a role that records who did it opens with this. -->
+  <section id="scan" class="hidden">
+    <div class="bg-white rounded-2xl shadow p-6 max-w-md mx-auto text-center space-y-4">
+      <i class="fa-solid fa-id-badge text-5xl" style="color: var(--boord-blue)"></i>
+      <div class="text-xl font-bold">Scan your Boord badge to start</div>
+      <div id="qrReader" class="hidden w-full rounded-lg overflow-hidden bg-black min-h-[240px]"></div>
+      <button id="scanBtn" type="button" class="w-full boord-btn-primary rounded-xl py-6 text-xl font-bold">
+        <i class="fa-solid fa-qrcode"></i> Scan your badge</button>
+      <button id="scanCancel" type="button" class="hidden w-full border rounded-xl py-3 font-semibold">Cancel</button>
+      <div id="scanMsg" class="text-sm text-red-600 min-h-[1.25rem]"></div>
+    </div>
+  </section>
+
+  <!-- Sulfur tent: one card per tent (sulfur.js). -->
+  <section id="sulfur" class="hidden space-y-3">
+    <div id="operatorBar" class="bg-white rounded-2xl shadow p-3 flex items-center gap-3"></div>
+    <div id="tentCards" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+  </section>
+
   <!-- Settings PIN: four digits on a keypad big enough for gloves. -->
   <section id="pin" class="hidden">
     <div class="bg-white rounded-2xl shadow p-6 max-w-sm mx-auto text-center">
@@ -69,6 +92,11 @@
         <div class="font-semibold mb-1">Packhouse settings</div>
         <div class="text-sm text-slate-500">The sulfur dose, tents, acid bath limits, lines and pallet sizes arrive here with their modules.</div>
       </div>
+    </div>
+
+    <div data-settings-page="tents" class="space-y-3">
+      <div class="text-sm text-slate-500 px-1">The tents on the sulfur screen, and what each one starts with. A tent that is no longer used is switched off, never deleted, so its past runs keep its name.</div>
+      <div id="tentSettings" class="space-y-3"></div>
     </div>
 
     <div data-settings-page="backup" class="space-y-3">

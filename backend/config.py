@@ -2,7 +2,7 @@
 
 This app runs beside Boord on the farm server as its own process, the same
 way Boord Labour and Boord Owner do. It owns one database (data/packhouse.db)
-and will read Boord's database (data/boord.db) read-only for lots, blocks,
+and reads Boord's database (data/boord.db) read-only for lots, blocks,
 suppliers and workers. Every path can be overridden by an environment
 variable so the Windows installer can point the service at wherever Boord
 actually lives.
@@ -20,11 +20,13 @@ PACKHOUSE_DB_PATH = os.environ.get("PACKHOUSE_DB_PATH", os.path.join(DATA_DIR, "
 # Boord's live SQLite file. The default assumes Boord is checked out beside
 # this repo (../Boord); on the farm server the installer sets BOORD_DB_PATH
 # to the real absolute path (e.g. C:\Boord\data\boord.db).
-# ponytail: nothing reads it yet. The first module that needs lots or workers
-# adds the read-only boord_engine and the schema check - copy both from
-# ../Boord-labour/backend/db.py and main.py.
+# Read for workers, blocks, suppliers and received lots (boord.py).
 BOORD_DB_PATH = os.path.abspath(os.environ.get(
     "BOORD_DB_PATH", os.path.join(REPO_ROOT, "..", "Boord", "data", "boord.db")))
+
+# Worker photos live beside Boord's database. Served read-only so the badge
+# scan can show the face that belongs to the badge.
+BOORD_PHOTOS_DIR = os.path.join(os.path.dirname(BOORD_DB_PATH), "photos")
 
 # Boord's own server, asked over localhost for the farm's live weather (its
 # /api/weather/current reads the on-farm station or GPS from Boord's

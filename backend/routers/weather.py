@@ -16,10 +16,15 @@ import config
 router = APIRouter(prefix="/api/weather", tags=["weather"])
 
 
-@router.get("/current")
-def current_weather():
+def farm_weather(timeout: float = 5) -> dict:
+    """Boord's answer, or {} - also stamped onto sulfur runs."""
     try:
-        with urllib.request.urlopen(f"{config.BOORD_URL}/api/weather/current", timeout=5) as resp:
+        with urllib.request.urlopen(f"{config.BOORD_URL}/api/weather/current", timeout=timeout) as resp:
             return json.loads(resp.read())
     except Exception:  # noqa: BLE001 - see the module docstring
         return {}
+
+
+@router.get("/current")
+def current_weather():
+    return farm_weather()

@@ -5,15 +5,15 @@
 // hash (#sulfur, #settings/backup), so the browser's own back button works
 // too.
 //
-// Every role is a placeholder for now. Each one is built in its own stage
-// of Boord_Packhouse_App_Plan.md ("Build stages").
+// Sulfur tent is built (sulfur.js, with its offline sync in sync.js); the
+// other roles are placeholders until their stage of Boord_Packhouse_App_Plan.md.
 
 const $ = (id) => document.getElementById(id);
 const esc = (v) => Boord.escapeHtml(v);
 
 // The plan's home-screen order.
 const MODULES = [
-  { id: "sulfur",   name: "Sulfur tent",         icon: "fa-tent",                     blurb: "Load a run, dose, countdown and overrun alarm." },
+  { id: "sulfur",   name: "Sulfur tent",         icon: "fa-tent",                     blurb: "Load a run, dose, countdown and overrun alarm.", built: true },
   { id: "acid",     name: "Acid bath",           icon: "fa-flask",                    blurb: "Batches, dip and drying timers, chemical changes." },
   { id: "prepack",  name: "Pre-pack",            icon: "fa-box-open",                 blurb: "Punnets into cartons onto pre-pack pallets." },
   { id: "lines",    name: "Lines",               icon: "fa-arrows-split-up-and-left", blurb: "Grading split by route, cartons and pallets." },
@@ -26,7 +26,7 @@ function renderHome() {
     <a href="#${m.id}" class="bg-white rounded-2xl shadow p-4 flex flex-col items-center justify-center text-center min-h-[10rem] md:min-h-[12rem] active:bg-slate-50">
       <i class="fa-solid ${m.icon} text-5xl md:text-6xl" style="color: var(--boord-blue)"></i>
       <div class="font-bold text-lg md:text-xl mt-3 leading-tight">${esc(m.name)}</div>
-      <div class="text-xs text-slate-400 mt-1">Coming soon</div>
+      ${m.built ? `<div id="tileStatus-${m.id}" class="mt-1"></div>` : `<div class="text-xs text-slate-400 mt-1">Coming soon</div>`}
     </a>`).join("");
 }
 
@@ -156,6 +156,7 @@ async function runBackupNow() {
 // --------------------------------------------------------------------------
 const SETTINGS_PAGES = [
   { id: "packhouse", name: "Packhouse", icon: "fa-sliders" },
+  { id: "tents",     name: "Tents",     icon: "fa-tent",       load: loadTentSettings },
   { id: "backup",    name: "Backup",    icon: "fa-database",   load: loadBackupsList },
   { id: "pin",       name: "PIN",       icon: "fa-key" },
 ];
@@ -176,8 +177,12 @@ function show() {
   const inSettings = hash === "#settings" || hash.startsWith("#settings/");
   if (!inSettings) lockSettings();
   const m = MODULES.find((x) => `#${x.id}` === hash);
-  const view = inSettings ? (unlocked ? "settings" : "pin") : m ? "module" : "home";
-  for (const id of ["home", "module", "pin", "settings"]) $(id).classList.toggle("hidden", id !== view);
+  // Home ends the operator's turn: the next role needs the next badge.
+  if (!hash || hash === "#") Operator.clear();
+  const view = inSettings ? (unlocked ? "settings" : "pin")
+    : m && m.id === "sulfur" ? (Operator.current() ? "sulfur" : "scan")
+    : m ? "module" : "home";
+  for (const id of ["home", "module", "scan", "sulfur", "pin", "settings"]) $(id).classList.toggle("hidden", id !== view);
   // The settings menu replaces the main one only once the PIN is in; the
   // PIN pad keeps the main menu so Home is one tap away.
   $("mainNav").classList.toggle("hidden", view === "settings");
@@ -191,6 +196,9 @@ function show() {
     $("moduleBlurb").textContent = m.blurb;
   }
   if (view === "pin") { pinEntry = ""; $("pinError").textContent = ""; renderPinDots(); }
+  if (view !== "scan") stopCamera();
+  if (view === "scan") $("scanMsg").textContent = "";
+  if (view === "sulfur") renderSulfur(true);
   if (view === "settings") {
     touchSettings();
     document.querySelectorAll("[data-settings-page]").forEach((el) =>
@@ -202,31 +210,6 @@ function show() {
   document.querySelectorAll("[data-nav]").forEach((a) =>
     a.classList.toggle("tab-active", a.dataset.nav === (inSettings ? "settings" : "home")));
   window.scrollTo(0, 0);
-}
-
-// Header pill, the same colours as Field's so it reads the same at arm's
-// length: green = online and synced, amber = pending, red = offline.
-function setSyncStatus(state, text) {
-  const el = $("syncStatus");
-  el.textContent = text;
-  el.classList.remove("bg-white/20", "bg-green-600", "bg-amber-400", "text-slate-900", "bg-red-600");
-  if (state === "synced") el.classList.add("bg-green-600");
-  else if (state === "pending") el.classList.add("bg-amber-400", "text-slate-900");
-  else if (state === "offline") el.classList.add("bg-red-600");
-  else el.classList.add("bg-white/20");
-}
-
-// Nothing is queued on the tablet yet, so "synced" just means the server
-// answered. ponytail: add the outbox count ("Syncing 3...", "Offline - 3
-// pending") when the first module gets an IndexedDB outbox, as Field does.
-const PROBE_INTERVAL_MS = 15000;
-async function checkServer() {
-  try {
-    await Boord.api("/api/version", { timeoutMs: 5000 });
-    setSyncStatus("synced", "Online - synced");
-  } catch (e) {
-    setSyncStatus("offline", "Offline");
-  }
 }
 
 // Same strip as Boord Admin's header. Boord owns the weather source; this
@@ -249,15 +232,12 @@ async function updateWeather() {
 Boord.boot(() => {
   $("appVersion").textContent = `v${Boord.VERSION}`;
   Boord.offlineBanner("No connection to the server");
-  checkServer();
-  setInterval(checkServer, PROBE_INTERVAL_MS);
-  window.addEventListener("online", checkServer);
-  window.addEventListener("offline", () => setSyncStatus("offline", "Offline"));
   updateWeather();
   setInterval(updateWeather, WEATHER_INTERVAL_MS);
   renderHome();
   renderPinPad();
   renderSettingsNav();
+  initSulfur();
   // Never inherit a sign-in: a tablet reloaded (or an installed app reopened)
   // may still hold the session cookie, and the next person must type the PIN.
   Boord.api("/api/admin/logout", { method: "POST" }).catch(() => {});
@@ -268,5 +248,6 @@ Boord.boot(() => {
   $("settings").addEventListener("input", touchSettings);
   window.addEventListener("hashchange", show);
   show();
+  Store.start();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("service-worker.js").catch(() => {});
 });
