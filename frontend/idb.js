@@ -1,4 +1,4 @@
-// Write-ahead log for sulfur runs, the same idea as Boord Labour's idb.js and
+// Write-ahead log for sulfur runs and acid records, the same idea as Boord Labour's idb.js and
 // Boord Field's. A run lands here first with synced = 0 - started, or ended
 // on this tablet - so it is never lost to patchy Wi-Fi; sync.js sends the
 // unsynced ones until the server has them.
@@ -44,13 +44,14 @@ const IDB = (() => {
     // Only rows that have not changed since they were sent: a run ended on
     // this tablet while its start was in flight must stay pending.
     async markSynced(sent, error = "") {
-      const want = new Map(sent.map((r) => [r.uuid, r.ended_at || ""]));
-      const rows = (await this.all()).filter((r) => want.has(r.uuid) && want.get(r.uuid) === (r.ended_at || ""));
+      const stamp = (r) => `${r.dip_ended_at || ""}|${r.ended_at || ""}`;
+      const want = new Map(sent.map((r) => [r.uuid, stamp(r)]));
+      const rows = (await this.all()).filter((r) => want.has(r.uuid) && want.get(r.uuid) === stamp(r));
       await run("readwrite", (s) => rows.forEach((r) => s.put({ ...r, synced: 1, error })));
     },
     async prune() {
       const cutoff = new Date(Date.now() - PRUNE_AFTER_DAYS * 864e5).toISOString();
-      const stale = (await this.all()).filter((r) => r.synced && r.started_at < cutoff);
+      const stale = (await this.all()).filter((r) => r.synced && (r.started_at || r.changed_at || r.checked_at) < cutoff);
       await run("readwrite", (s) => stale.forEach((r) => s.delete(r.uuid)));
     },
   };

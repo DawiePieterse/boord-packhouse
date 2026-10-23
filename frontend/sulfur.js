@@ -1,4 +1,4 @@
-// The Sulfur tent role: badge scan, one card per tent with its suggested
+// The Sulfur tent role (the badge scan is shared with the acid bath, acid.js): one card per tent with its suggested
 // time (suggest.js), countdowns, the home tile, the alarm, and Settings ->
 // Tents and Sulfur.
 //
@@ -291,6 +291,18 @@ function refreshSuggestions() {
   });
 }
 
+// Who is signed in, with "Not you?" - on the sulfur and acid screens.
+function renderOperatorBar(el) {
+  const op = Operator.current();
+  el.innerHTML = op ? `
+    ${op.photo ? `<img src="${esc(op.photo)}" class="w-10 h-10 rounded-full object-cover" alt="">`
+               : `<i class="fa-solid fa-user-circle text-4xl text-slate-400"></i>`}
+    <div class="flex-1"><div class="text-xs text-slate-500">Operator</div><div class="font-bold">${esc(op.name)}</div></div>
+    <button type="button" class="text-sm underline text-slate-600">Not you?</button>` : "";
+  const btn = el.querySelector("button");
+  if (btn) btn.onclick = () => { Operator.clear(); show(); };
+}
+
 // Cards are rebuilt only when what they show changes, never by the 1-second
 // tick or a sync that brought nothing new - a rebuild would wipe whatever
 // the operator is typing.
@@ -303,12 +315,7 @@ function renderSulfur(force = false) {
   if (!force && signature === sulfurSignature) return;
   sulfurSignature = signature;
 
-  $("operatorBar").innerHTML = op ? `
-    ${op.photo ? `<img src="${esc(op.photo)}" class="w-10 h-10 rounded-full object-cover" alt="">`
-               : `<i class="fa-solid fa-user-circle text-4xl text-slate-400"></i>`}
-    <div class="flex-1"><div class="text-xs text-slate-500">Operator</div><div class="font-bold">${esc(op.name)}</div></div>
-    <button type="button" id="notMeBtn" class="text-sm underline text-slate-600">Not you?</button>` : "";
-  if ($("notMeBtn")) $("notMeBtn").onclick = () => { Operator.clear(); show(); };
+  renderOperatorBar($("operatorBar"));
 
   $("tentCards").innerHTML = tents.length
     ? tents.map((t) => {

@@ -2,11 +2,14 @@
 //
 // - What the screens need is cached in localStorage and refreshed whenever
 //   the server answers: Boord's workers (badge scan), tents, fruit sources,
-//   the suggested-time settings, the weather and the server's sulfur runs.
-// - Runs made on this tablet go to the IndexedDB outbox (idb.js) and are
-//   sent by syncNow() every SYNC_EVERY_MS, and at once after any change.
+//   the suggested-time settings, the weather, the server's sulfur runs, the
+//   acid baths and their state.
+// - Records made on this tablet - sulfur runs, and acid batches, chemical
+//   changes and checks (marked by `kind`) - go to the IndexedDB outbox
+//   (idb.js) and are sent by syncNow() every SYNC_EVERY_MS, and at once after
+//   any change, each to its own module's sync endpoint.
 // - The tablet's clock is corrected from the server's (server_now in every
-//   sulfur response): run start times are tablet times, and a tablet that is
+//   sulfur and acid response): run start times are tablet times, and a tablet that is
 //   minutes out would skew the timers on every other tablet. Store.now() is
 //   the corrected clock - use it, never Date.now(), for anything a run holds.
 // - The header pill says where it stands, in Field's colours.
@@ -17,7 +20,7 @@ const Store = (() => {
   const listeners = [];
   let busy = false;
   let lastWorkers = 0;
-  let localRuns = new Map(); // uuid -> run, this tablet's outbox (synced or not)
+  let localRuns = new Map(); // uuid -> record, this tablet's outbox (synced or not)
 
   function cached(key, fallback) {
     try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch (_) { return fallback; }
@@ -57,10 +60,29 @@ const Store = (() => {
     try { localRuns = new Map((await IDB.all()).map((r) => [r.uuid, r])); } catch (e) { /* private mode: server list only */ }
   }
 
-  // A run as the server wants it: no outbox bookkeeping.
+  // A record as the server wants it: no outbox bookkeeping.
   function wire(r) {
-    const { synced, error, ...rest } = r;
+    const { synced, error, kind, ...rest } = r;
     return rest;
+  }
+  const ofKind = (rows, kind) => rows.filter((r) => (r.kind || "") === kind).map(wire);
+  // Where each kind of outbox record is sent; sulfur runs have no kind.
+  const OUTBOXES = [
+    ["/api/sulfur/sync", (rows) => ({ runs: ofKind(rows, "") })],
+    ["/api/acid/sync", (rows) => ({ batches: ofKind(rows, "acid_batch"), changes: ofKind(rows, "acid_change"),
+                                    checks: ofKind(rows, "acid_check") })],
+  ];
+
+  // The server's list with this tablet's own copies merged in, the local
+  // copy winning where it has got further (not sent yet, or ended here).
+  function merged(serverRows, kind) {
+    const all = new Map(serverRows.map((r) => [r.uuid, r]));
+    for (const r of localRuns.values()) {
+      if ((r.kind || "") !== kind) continue;
+      const server = all.get(r.uuid);
+      if (!server || (!server.ended_at && r.ended_at) || (!server.dip_ended_at && r.dip_ended_at)) all.set(r.uuid, r);
+    }
+    return [...all.values()];
   }
 
   async function syncNow() {
@@ -72,17 +94,21 @@ const Store = (() => {
       if (!navigator.onLine) throw Object.assign(new Error("offline"), { offline: true });
       if (pending.length) {
         setPill("pending", `Syncing ${pending.length}...`);
-        const sentAt = Date.now();
-        const out = await Boord.api("/api/sulfur/sync", { method: "POST", body: { device: device(), runs: pending.map(wire) } });
-        learnClock(out.server_now, sentAt);
-        const synced = new Set(out.synced);
-        await IDB.markSynced(pending.filter((r) => synced.has(r.uuid)));
-        for (const bad of out.rejected) {
-          // Refused for good (a deleted tent, a bad value): stop resending it
-          // and say so, rather than pinning the pill on amber forever.
-          console.warn("Run refused by the server:", bad);
-          Boord.toast(`A run was refused by the server: ${bad.error}`);
-          await IDB.markSynced(pending.filter((r) => r.uuid === bad.uuid), bad.error);
+        for (const [path, bodyOf] of OUTBOXES) {
+          const body = bodyOf(pending);
+          if (!Object.values(body).some((rows) => rows.length)) continue;
+          const sentAt = Date.now();
+          const out = await Boord.api(path, { method: "POST", body: { device: device(), ...body } });
+          learnClock(out.server_now, sentAt);
+          const synced = new Set(out.synced);
+          await IDB.markSynced(pending.filter((r) => synced.has(r.uuid)));
+          for (const bad of out.rejected) {
+            // Refused for good (a deleted tent, a bad value): stop resending it
+            // and say so, rather than pinning the pill on amber forever.
+            console.warn("Record refused by the server:", bad);
+            Boord.toast(`A record was refused by the server: ${bad.error}`);
+            await IDB.markSynced(pending.filter((r) => r.uuid === bad.uuid), bad.error);
+          }
         }
         await IDB.prune().catch(() => {});
         await loadLocal();
@@ -94,6 +120,8 @@ const Store = (() => {
       keep("ph_tents", await Boord.api("/api/tents"));
       keep("ph_sources", await Boord.api("/api/fruit-sources"));
       keep("ph_sulfur_settings", await Boord.api("/api/sulfur/settings"));
+      keep("ph_acid", await Boord.api("/api/acid/state"));
+      keep("ph_baths", await Boord.api("/api/baths"));
       if (Date.now() - lastWorkers > WORKERS_EVERY_MS) await refreshWorkers();
       const left = (await IDB.pending().catch(() => [])).length;
       setPill(left ? "pending" : "synced", left ? `Syncing ${left}...` : "Online - synced");
@@ -134,18 +162,16 @@ const Store = (() => {
     refreshWorkers: () => refreshWorkers().catch(() => {}),
     syncNow,
 
-    // Every run this tablet knows of: the server's list, with this tablet's
-    // own copy winning where it is newer (not sent yet, or ended here).
-    runs() {
-      const all = new Map(cached("ph_server_runs", []).map((r) => [r.uuid, r]));
-      for (const r of localRuns.values()) {
-        const server = all.get(r.uuid);
-        if (!server || (!server.ended_at && r.ended_at)) all.set(r.uuid, r);
-      }
-      return [...all.values()];
-    },
+    // Every sulfur run this tablet knows of.
+    runs: () => merged(cached("ph_server_runs", []), ""),
+    baths: () => cached("ph_baths", []),
+    // Acid batches, chemical changes and checks: the server's (acid.py's
+    // /state) and this tablet's own.
+    acidBatches: () => merged(cached("ph_acid", {}).batches || [], "acid_batch"),
+    acidChanges: () => merged(cached("ph_acid", {}).changes || [], "acid_change"),
+    acidChecks: () => merged(cached("ph_acid", {}).checks || [], "acid_check"),
 
-    // Start or end a run: into the outbox first, then try to send it.
+    // Make or update a record: into the outbox first, then try to send it.
     async saveRun(r) {
       const row = { ...r, synced: 0, error: "" };
       localRuns.set(row.uuid, row);
