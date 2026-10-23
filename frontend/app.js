@@ -176,8 +176,9 @@ function show() {
   const inSettings = hash === "#settings" || hash.startsWith("#settings/");
   if (!inSettings) lockSettings();
   const m = MODULES.find((x) => `#${x.id}` === hash);
-  // Home ends the operator's turn: the next role needs the next badge.
-  if (!hash || hash === "#") Operator.clear();
+  // Off the sulfur screen, the operator stays signed in for a 10-minute
+  // grace period (Operator.leave), so popping out to Home needs no rescan.
+  if (hash !== "#sulfur") Operator.leave();
   const view = inSettings ? (unlocked ? "settings" : "pin")
     : m && m.id === "sulfur" ? (Operator.current() ? "sulfur" : "scan")
     : m ? "module" : "home";

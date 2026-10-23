@@ -9,20 +9,33 @@
 
 // --------------------------------------------------------------------------
 // Operator: who is working, from their Boord badge. Stamped on every run
-// they start or end; cleared by Home, or after OPERATOR_IDLE_MS untouched.
+// they start or end. Signed out after OPERATOR_IDLE_MS untouched on the
+// sulfur screen, or OPERATOR_GRACE_MS after leaving it for Home - a quick
+// look at the home screen must not mean scanning the badge again. "Not
+// you?" signs out at once.
 // --------------------------------------------------------------------------
 const OPERATOR_IDLE_MS = 15 * 60 * 1000;
+const OPERATOR_GRACE_MS = 10 * 60 * 1000;
 
 const Operator = {
   current() {
     try {
       const o = JSON.parse(localStorage.getItem("ph_operator"));
-      if (o && Date.now() - o.at < OPERATOR_IDLE_MS) return o.worker;
+      if (o && Date.now() < o.until) return o.worker;
     } catch (_) { /* none */ }
     return null;
   },
-  set(worker) { localStorage.setItem("ph_operator", JSON.stringify({ worker, at: Date.now() })); },
+  set(worker, ms = OPERATOR_IDLE_MS) {
+    localStorage.setItem("ph_operator", JSON.stringify({ worker, until: Date.now() + ms }));
+  },
   touch() { const w = this.current(); if (w) this.set(w); },
+  // Left for Home: still signed in for the grace period, never longer.
+  leave() {
+    try {
+      const o = JSON.parse(localStorage.getItem("ph_operator"));
+      if (o && Date.now() < o.until) this.set(o.worker, Math.min(o.until - Date.now(), OPERATOR_GRACE_MS));
+    } catch (_) { /* none */ }
+  },
   clear() { localStorage.removeItem("ph_operator"); },
 };
 
