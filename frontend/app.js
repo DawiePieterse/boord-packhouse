@@ -13,16 +13,18 @@ const esc = (v) => Boord.escapeHtml(v);
 
 const PALLET_BOXES = `<svg viewBox="0 0 64 64" class="w-[1.15em] h-[1em] inline-block" fill="currentColor" aria-hidden="true"><rect x="10" y="8" width="20" height="14" rx="1.5"/><rect x="34" y="8" width="20" height="14" rx="1.5"/><rect x="4" y="25" width="17" height="14" rx="1.5"/><rect x="23.5" y="25" width="17" height="14" rx="1.5"/><rect x="43" y="25" width="17" height="14" rx="1.5"/><rect x="2" y="42" width="60" height="6" rx="1"/><rect x="6" y="50" width="10" height="7" rx="1"/><rect x="27" y="50" width="10" height="7" rx="1"/><rect x="48" y="50" width="10" height="7" rx="1"/></svg>`;
 
-// The plan's home-screen order.
+// The plan's home-screen order. parked: built, but kept off the home screen
+// and the settings menu until the farm takes it up again (its code and
+// #<id> address still work); remove the flag to bring it back.
 const MODULES = [
-  { id: "sulfur",   name: "Sulfur tent",         icon: "fa-tent",                     blurb: "Load a run, dose, countdown and overrun alarm.", built: true },
-  { id: "acid",     name: "Acid bath",           icon: "fa-flask",                    blurb: "Batches, dip and drying timers, chemical changes.", built: true },
+  { id: "sulfur",   name: "Sulfur tent",         icon: "fa-tent",                     blurb: "Load a run, dose, countdown and overrun alarm.", built: true, parked: true },
+  { id: "acid",     name: "Acid bath",           icon: "fa-flask",                    blurb: "Batches, dip and drying timers, chemical changes.", built: true, parked: true },
   { id: "palletstack", name: "Pallet Stack",   icon: "",                  iconHtml: PALLET_BOXES, blurb: "Pallets and cartons grouped into a pallet stack.", built: true },
   { id: "deliverynote", name: "Delivery Note",   icon: "fa-file-lines",               blurb: "Delivery note for a load leaving the farm." },
 ];
 
 function renderHome() {
-  $("home").innerHTML = MODULES.map((m) => `
+  $("home").innerHTML = MODULES.filter((m) => !m.parked).map((m) => `
     <a href="#${m.id}" class="bg-white rounded-2xl shadow p-4 flex flex-col items-center justify-center text-center min-h-[10rem] md:min-h-[12rem] active:bg-slate-50">
       ${m.iconHtml ? `<span class="text-5xl md:text-6xl leading-none" style="color: var(--boord-blue)">${m.iconHtml}</span>` : `<i class="fa-solid ${m.icon} text-5xl md:text-6xl" style="color: var(--boord-blue)"></i>`}
       <div class="font-bold text-lg md:text-xl mt-3 leading-tight">${esc(m.name)}</div>
@@ -155,17 +157,18 @@ async function runBackupNow() {
 // runs each time the page opens.
 // --------------------------------------------------------------------------
 const SETTINGS_PAGES = [
-  { id: "sulfur",    name: "Sulfur",    icon: "fa-tent",       load: () => { loadTentSettings(); loadSulfurSettings(); loadSulfurReport(); } },
-  { id: "acid",      name: "Acid",      icon: "fa-flask",      load: loadBathSettings },
+  { id: "sulfur",    name: "Sulfur",    icon: "fa-tent",       parked: true, load: () => { loadTentSettings(); loadSulfurSettings(); loadSulfurReport(); } },
+  { id: "acid",      name: "Acid",      icon: "fa-flask",      parked: true, load: loadBathSettings },
   { id: "palletstack", name: "Pallet Stack", icon: "", iconHtml: PALLET_BOXES, load: loadConsignmentSettings },
   { id: "setup",     name: "Setup",     icon: "fa-screwdriver-wrench", load: loadBackupsList },
 ];
 
 function renderSettingsNav() {
   const nav = $("settingsNav");
-  nav.style.gridTemplateColumns = `repeat(${SETTINGS_PAGES.length + 1}, minmax(0, 1fr))`;
+  const pages = SETTINGS_PAGES.filter((p) => !p.parked);
+  nav.style.gridTemplateColumns = `repeat(${pages.length + 1}, minmax(0, 1fr))`;
   nav.innerHTML = `<a href="#" class="py-2 text-center text-sm"><i class="fa-solid fa-house text-2xl block"></i>Home</a>`
-    + SETTINGS_PAGES.map((p) => `<a href="#settings/${p.id}" data-settings-nav="${p.id}" class="py-2 text-center text-[11px] sm:text-sm">`
+    + pages.map((p) => `<a href="#settings/${p.id}" data-settings-nav="${p.id}" class="py-2 text-center text-[11px] sm:text-sm">`
       + (p.iconHtml ? `<span class="h-8 flex items-center justify-center text-[1.6rem]">${p.iconHtml}</span>` : `<i class="fa-solid ${p.icon} text-2xl block"></i>`)
       + `${esc(p.name)}</a>`).join("");
 }
@@ -193,7 +196,7 @@ function show() {
   $("mainNav").classList.toggle("hidden", view === "settings");
   $("settingsNav").classList.toggle("hidden", view !== "settings");
 
-  const page = SETTINGS_PAGES.find((p) => hash === `#settings/${p.id}`) || SETTINGS_PAGES[0];
+  const page = SETTINGS_PAGES.find((p) => hash === `#settings/${p.id}`) || SETTINGS_PAGES.find((p) => !p.parked);
   $("title").textContent = m ? m.name : view === "settings" ? `Settings · ${page.name}` : inSettings ? "Settings" : "Boord Packhouse";
   if (m) {
     $("moduleIcon").className = m.iconHtml ? "text-6xl" : `fa-solid ${m.icon} text-6xl`;

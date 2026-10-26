@@ -61,10 +61,8 @@ function palletsView() {
       <button type="button" data-add class="w-full boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-barcode"></i> Add a new pallet</button>
     </div>
     <div class="bg-white rounded-2xl shadow px-4 pb-1">
-      <div class="flex justify-between items-baseline gap-3 pt-3">
-        <div class="font-semibold whitespace-nowrap">Pallets added today</div>
-        <div class="text-sm text-right"><b>${pallets.length}</b> pallet${pallets.length === 1 ? "" : "s"} · <b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b></div>
-      </div>
+      <div class="font-semibold pt-3">Pallets added today</div>
+      <div class="text-sm"><b>${pallets.length}</b> pallet${pallets.length === 1 ? "" : "s"} · <b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b></div>
       <div class="text-xs text-slate-500 pb-2">Tap a pallet to edit or delete it.</div>
       ${rows || `<div class="text-center text-slate-400 text-sm py-6 border-t">No pallets yet today</div>`}
     </div>`;
@@ -72,17 +70,38 @@ function palletsView() {
 
 // ---- A pallet: scan its label, then what is on it ---------------------------
 
+// What this phone last saved (supplier, market, carton type, block): a new
+// pallet starts from it. Only a convenience, so a missing copy is no harm.
+const LAST_USED = "ph_pallet_last";
+function lastUsed() {
+  try { return JSON.parse(localStorage.getItem(LAST_USED)) || {}; } catch (_) { return {}; }
+}
+function rememberUsed(d, lines) {
+  const l = lines[lines.length - 1];
+  try {
+    localStorage.setItem(LAST_USED, JSON.stringify({ supplier_id: d.supplier_id, market_id: d.market_id,
+                                                     packaging_id: l.packaging_id, block_id: l.block_id || "" }));
+  } catch (_) { /* private mode */ }
+}
+// A remembered id only if it is still on offer: a retired carton or market is not picked for you.
+const stillOffered = (list, id) => (list.some((r) => r.id === id) ? id : null);
+
 function openPallet(pallet) {
   cn.view = "pallet";
-  // A new pallet starts with the supplier and market of the last one made.
-  const last = pallet || newestFirst()[0] || {};
-  cn.draft = {
-    uuid: pallet ? pallet.uuid : Boord.uuid(), pallet: pallet || null, barcode: pallet ? pallet.barcode : "",
-    ref: pallet ? pallet.pallet_ref || "" : nextRef(), supplier_id: last.supplier_id == null ? null : last.supplier_id,
-    market_id: last.market_id == null ? null : last.market_id,
-    lines: pallet ? pallet.lines.map((l) => ({ packaging_id: l.packaging_id, cartons: l.cartons, block_id: l.block_id || "" }))
-      : [{ packaging_id: null, cartons: "", block_id: "" }],
-  };
+  if (pallet) {
+    cn.draft = { uuid: pallet.uuid, pallet, barcode: pallet.barcode, ref: pallet.pallet_ref || "",
+                 supplier_id: pallet.supplier_id, market_id: pallet.market_id,
+                 lines: pallet.lines.map((l) => ({ packaging_id: l.packaging_id, cartons: l.cartons, block_id: l.block_id || "" })) };
+  } else {
+    // The values this phone last used, else those of the newest pallet.
+    const newest = newestFirst()[0] || {};
+    const line = (newest.lines || []).slice(-1)[0] || {};
+    const last = { supplier_id: newest.supplier_id, market_id: newest.market_id, packaging_id: line.packaging_id,
+                   block_id: line.block_id, ...lastUsed() };
+    cn.draft = { uuid: Boord.uuid(), pallet: null, barcode: "", ref: nextRef(),
+                 supplier_id: stillOffered(Store.suppliers(), last.supplier_id), market_id: stillOffered(Store.markets(), last.market_id),
+                 lines: [{ packaging_id: stillOffered(Store.packaging(), last.packaging_id), cartons: "", block_id: last.block_id || "" }] };
+  }
   renderConsignment();
   if (!pallet) startPalletScan();
 }
@@ -272,6 +291,7 @@ async function savePallet() {
                         changed_by: op.id || "", changed_by_name: op.name || "",
                         supplier_id: supplier.id, supplier_name: supplier.name, market_id: market.id, market_name: market.name,
                         date_code: palletDateCode(d.pallet), removed: false, rev: Date.now() });
+  rememberUsed(d, lines);
   cn.view = "list";
   renderConsignment();
 }
@@ -296,15 +316,16 @@ function onConsignmentClick(ev) {
   else if ("cancel" in t.dataset) { cn.view = "list"; renderConsignment(); }
   else if ("scan" in t.dataset) startPalletScan();
   else if ("addline" in t.dataset) {
-    // A new line starts on the block of the one above: usually the same fruit.
-    d.lines.push({ packaging_id: null, cartons: "", block_id: d.lines.length ? d.lines[d.lines.length - 1].block_id : "" });
+    // A new line starts with the carton type and block of the one above.
+    const above = d.lines[d.lines.length - 1] || {};
+    d.lines.push({ packaging_id: above.packaging_id == null ? null : above.packaging_id, cartons: "", block_id: above.block_id || "" });
     sync();
   }
   else if (t.dataset.drop) {
     const i = Number(t.dataset.drop);
     const l = d.lines[i];
-    // Ask first, unless nothing was entered (a new line's block is only copied from the line above).
-    if ((l.packaging_id != null || l.cartons !== "") && !confirm(`Delete line ${i + 1}?`)) return;
+    // Ask first, unless no Qty was typed (a new line's carton type and block are only copied from the line above).
+    if (l.cartons !== "" && !confirm(`Delete line ${i + 1}?`)) return;
     d.lines.splice(i, 1);
     if (!d.lines.length) d.lines.push({ packaging_id: null, cartons: "", block_id: "" }); // a pallet is deleted with its own button
     sync();
