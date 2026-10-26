@@ -200,17 +200,14 @@ def _day(v: str) -> str:
     return date.fromisoformat(v).strftime("%d/%m/%y") if v else ""
 
 
-@router.get("/{uuid}/pdf")
-def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
-    """The note as the paper Afleweringsnota, on A4, signature lines blank."""
+def _draw(n: DeliveryNote, pages: int):
+    """The note as the paper Afleweringsnota on A4; pages is how many it
+    runs to (note_pdf draws it once to count them), so "page 1 of 2" can be
+    right-aligned: fpdf2's {nb} placeholder is filled in after the line is placed."""
     from fpdf import FPDF
-    n = session.get(DeliveryNote, uuid)
-    if n is None or n.removed:
-        raise HTTPException(404, "No such delivery note")
     pdf = FPDF(format="A4")
     pdf.set_margins(15, 15, 15)
     pdf.set_auto_page_break(True, margin=15)
-    pdf.alias_nb_pages()
     pdf.add_page()
     w = pdf.epw  # 180 mm
     half = w / 2
@@ -240,10 +237,11 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
         text(11, "AFLEWERINGSNOTA", "B", h=7, w=46)
         pdf.set_text_color(200, 0, 0)
         text(14, str(n.note_no), "B", h=7, w=30)
+        text(14, f"page {pdf.page_no()} of {pages}", "B", h=7, w=w - 76, align="R")
         pdf.set_text_color(0, 0, 0)
+        pdf.ln()
 
     title_no()
-    pdf.ln()
 
     # Afsender | Ontvanger, the same way (capitals, as the printed sender), then
     # three equal signature boxes.
@@ -296,7 +294,6 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     def head():
         if pdf.page_no() > 1:  # a later page says whose it is, as the first page does
             title_no()
-            text(9, f"page {pdf.page_no()} of {{nb}}", h=7, align="R", new_x="LMARGIN", new_y="NEXT")
         pdf.set_xy(x0, pdf.get_y())
         text(7, "PALLET NO", "B", border=1, w=col, h=6, align="C")
         text(7, "BESKRYWING VAN INHOUD", "B", border=1, w=w - col, h=6, align="C", new_x="LMARGIN", new_y="NEXT")
@@ -333,9 +330,7 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     text(7, "TOTAL", "B", border=1, w=col, h=8, align="C")
     value(total, "B", border=1, w=w - col, h=8, new_x="LMARGIN", new_y="NEXT")
 
-    # The small print and the two dates, boxed on under the table.
-    pdf.set_font("Helvetica", "", 6)
-    pdf.multi_cell(w, 3, _latin(SMALL_PRINT), border=1, align="C", padding=(1, 1.5), new_x="LMARGIN", new_y="NEXT")
+    # The two dates, then the small print at the very bottom, boxed on under the table.
     y = pdf.get_y()
     for x, title, v in ((x0, "OPLAAIDATUM", n.loaded_on), (x0 + half, "AFLAAIDATUM", n.offloaded_on)):
         pdf.rect(x, y, half, 8)
@@ -344,6 +339,19 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
         room = pdf.get_string_width(title) + 3
         label(title, w=room)
         value(_day(v), w=half - room - 3)
+    pdf.set_xy(x0, y + 8)
+    pdf.set_font("Helvetica", "", 6)
+    pdf.multi_cell(w, 3, _latin(SMALL_PRINT), border=1, align="C", padding=(1, 1.5), new_x="LMARGIN", new_y="NEXT")
+    return pdf
+
+
+@router.get("/{uuid}/pdf")
+def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
+    """The note as the paper Afleweringsnota, on A4, signature lines blank."""
+    n = session.get(DeliveryNote, uuid)
+    if n is None or n.removed:
+        raise HTTPException(404, "No such delivery note")
+    pdf = _draw(n, _draw(n, 1).page_no())
     name = f"afleweringsnota_{n.note_no}.pdf"
     return Response(bytes(pdf.output()), media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
