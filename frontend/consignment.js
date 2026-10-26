@@ -53,12 +53,18 @@ function palletsView() {
       <button type="button" data-add class="w-full boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-barcode"></i> Add a new pallet</button>
     </div>
     <div class="bg-white rounded-2xl shadow px-4 pb-1">
-      <div class="font-semibold pt-3">Pallets added today</div>
-      <div class="text-sm"><b>${pallets.length}</b> pallet${pallets.length === 1 ? "" : "s"} · <b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b></div>
-      <div class="text-xs text-slate-500 pb-2">Tap a pallet to edit or delete it.</div>
+      <div class="${LIST_HEAD}">
+        <div class="text-lg font-bold">Pallets added today</div>
+        <div class="text-base"><b>${pallets.length}</b> pallet${pallets.length === 1 ? "" : "s"} · <b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b></div>
+        <div class="text-xs text-white/80">Tap a pallet to edit or delete it.</div>
+      </div>
       ${rows || `<div class="text-center text-slate-400 text-sm py-6 border-t">No pallets yet today</div>`}
     </div>`;
 }
+
+// The head of a list card (Pallets added today; a delivery note's pallets): a
+// dark blue band across the card's top, so the totals stand out from the rows.
+const LIST_HEAD = "-mx-4 px-4 py-3 mb-1 rounded-t-2xl bg-[var(--boord-blue)] text-white";
 
 // One pallet as the list shows it: number, cartons and kg, date code, supplier,
 // market, barcode and its lines. The delivery note shows pallets the same way.

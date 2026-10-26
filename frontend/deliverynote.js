@@ -49,8 +49,10 @@ function notesView() {
       <button type="button" data-addnote class="w-full boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-file-lines"></i> New delivery note</button>
     </div>
     <div class="bg-white rounded-2xl shadow px-4 pb-1">
-      <div class="font-semibold pt-3">Recent delivery notes</div>
-      <div class="text-xs text-slate-500 pb-2">Tap a note to edit, print or share it.</div>
+      <div class="${LIST_HEAD}">
+        <div class="text-lg font-bold">Recent delivery notes</div>
+        <div class="text-xs text-white/80">Tap a note to edit, print or share it.</div>
+      </div>
       ${rows || `<div class="text-center text-slate-400 text-sm py-6 border-t">No delivery notes yet</div>`}
     </div>`;
 }
@@ -121,9 +123,11 @@ function noteForm() {
       </div>
     </div>
     <div class="bg-white rounded-2xl shadow px-4 pb-1">
-      <div class="font-semibold pt-3">Pallets on the truck</div>
-      <div id="noteTotals" class="text-sm">${noteTotals(picked)}</div>
-      <div class="text-xs text-slate-500 pb-2">Tick the pallets from Pallet Stack that go on this truck.</div>
+      <div class="${LIST_HEAD}">
+        <div class="text-lg font-bold">Pallets on the truck</div>
+        <div id="noteTotals" class="text-base">${noteTotals(picked)}</div>
+        <div class="text-xs text-white/80">Tick the pallets from Pallet Stack that go on this truck.</div>
+      </div>
       ${pallets || `<div class="text-center text-slate-400 text-sm py-6 border-t">No pallets left to send</div>`}
     </div>
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
