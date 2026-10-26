@@ -53,7 +53,9 @@ const IDB = (() => {
     },
     async prune() {
       const cutoff = new Date(Date.now() - PRUNE_AFTER_DAYS * 864e5).toISOString();
-      const stale = (await this.all()).filter((r) => r.synced && (r.started_at || r.changed_at || r.checked_at || r.scanned_at || r.created_at) < cutoff);
+      // A refused pallet or consignment is kept until it is fixed: it is shown.
+      const kept = (r) => r.error && (r.kind === "pallet" || r.kind === "consignment");
+      const stale = (await this.all()).filter((r) => r.synced && !kept(r) && (r.started_at || r.changed_at || r.checked_at || r.scanned_at || r.created_at) < cutoff);
       await run("readwrite", (s) => stale.forEach((r) => s.delete(r.uuid)));
     },
   };

@@ -148,12 +148,13 @@ def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
 
 @router.get("/state")
 def state(session: Session = Depends(get_packhouse_session)):
-    """The recent consignments with their pallets still on them, newest first."""
+    """The recent consignments and their pallets, newest first. Removed pallets
+    are sent too, so a phone holding its own copy of one learns it went."""
     now = _now()
     consignments = session.exec(select(Consignment).where(Consignment.created_at >= now - LISTED)
                                 .order_by(Consignment.created_at.desc())).all()
     uuids = [c.uuid for c in consignments]
-    pallets = session.exec(select(Pallet).where(Pallet.consignment_uuid.in_(uuids), Pallet.removed == False)  # noqa: E712
+    pallets = session.exec(select(Pallet).where(Pallet.consignment_uuid.in_(uuids))
                            .order_by(Pallet.scanned_at)).all() if uuids else []
     cons = []
     for c in consignments:

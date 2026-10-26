@@ -80,6 +80,7 @@ function detailView(c) {
         ${p.lines.map((l, i) => `<span data-li="${i}" class="block text-sm py-1 underline decoration-dotted decoration-slate-300">${esc(l.packaging_name)} <b>${l.cartons}</b></span>`).join("")}
         <div class="text-xs text-slate-500">${p.block_id ? `${esc(blockText(p))} · ` : ""}Date code ${esc(palletDateCode(p))}</div>
         <div class="text-xs text-slate-400 truncate">Barcode ${esc(p.barcode)}</div>
+        ${p.error ? `<div class="text-sm text-red-600">Not saved: ${esc(p.error)}. Tap to fix it.</div>` : ""}
       </div>
       <div class="text-right text-sm shrink-0"><div class="font-semibold">${palletCartons(p)}</div><div class="text-slate-500">${kgText(palletKg(p))}</div></div>
     </button>`).join("");
@@ -88,6 +89,7 @@ function detailView(c) {
       <button type="button" data-back class="px-3 py-2 rounded-lg border border-slate-300 bg-white"><i class="fa-solid fa-arrow-left"></i></button>
       <div class="text-slate-500 text-sm">${esc(dayText(c.created_at))}</div>
     </div>
+    ${c.error ? `<div class="text-sm text-red-600">Not saved: ${esc(c.error)}</div>` : ""}
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
       <select data-supplier class="w-full border border-slate-300 rounded-lg p-3 text-lg font-semibold">
         ${supplierOptions.map((s) => `<option value="${s.id}"${s.id === c.supplier_id ? " selected" : ""}>${esc(s.name)}</option>`).join("")}
@@ -183,7 +185,7 @@ function palletForm() {
         <input data-field="barcode" value="${esc(d.barcode)}" inputmode="numeric" placeholder="Scan the pallet label" class="flex-1 min-w-0 border border-slate-300 rounded-lg p-3 text-lg">
         <button type="button" data-scan class="px-4 rounded-lg border border-slate-300"><i class="fa-solid fa-barcode text-xl"></i></button>
       </div>
-      <div id="palletScanMsg" class="text-sm text-red-600 empty:hidden"></div>
+      <div id="palletScanMsg" class="text-sm text-red-600 empty:hidden">${d.pallet && d.pallet.error ? `Not saved: ${esc(d.pallet.error)}.` : ""}</div>
       <div class="text-sm font-semibold text-slate-600">What is on it</div>
       ${lines}
       <button type="button" data-addline class="text-blue-700 font-semibold"><i class="fa-solid fa-plus"></i> Another pack</button>

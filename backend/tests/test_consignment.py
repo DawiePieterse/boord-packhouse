@@ -58,9 +58,9 @@ def test_barcode_is_unique_until_the_pallet_is_removed(client):
     out = sync(client, pallets=[pallet("p2")])
     assert out["synced"] == [] and "already on pallet" in out["rejected"][0]["error"]
     sync(client, pallets=[pallet("p1", removed=True)])
-    assert state(client)["pallets"] == []
+    assert [(p["uuid"], p["removed"]) for p in state(client)["pallets"]] == [("p1", True)]  # sent, so other phones drop it
     assert sync(client, pallets=[pallet("p2")])["synced"] == ["p2"]
-    assert state(client)["pallets"][0]["pallet_no"] == 2  # p1's number is not reused
+    assert state(client)["pallets"][1]["pallet_no"] == 2  # p1's number is not reused
 
 
 @pytest.mark.parametrize("bad", [
