@@ -289,7 +289,7 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     # as Pallet Stack shows it, then the total. A block that would not fit
     # (with the small print and dates after the last one) starts a new page.
     col = 18
-    footer = 18
+    footer = 20  # the boxed small print and dates
 
     def head():
         if pdf.page_no() > 1:  # a later page says whose it is, as the first page does
@@ -331,14 +331,17 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     text(7, "TOTAL", "B", border=1, w=col, h=8, align="C")
     value(total, "B", border=1, w=w - col, h=8, new_x="LMARGIN", new_y="NEXT")
 
-    pdf.ln(1.5)
+    # The small print and the two dates, boxed on under the table.
     pdf.set_font("Helvetica", "", 6)
-    pdf.multi_cell(w, 3, _latin(SMALL_PRINT), align="C")
-    pdf.ln(2)
-    label("OPLAAIDATUM", w=20, h=6)
-    value(_day(n.loaded_on), w=half - 20, h=6)
-    label("AFLAAIDATUM", w=20, h=6)
-    value(_day(n.offloaded_on), h=6)
+    pdf.multi_cell(w, 3, _latin(SMALL_PRINT), border=1, align="C", padding=(1, 1.5), new_x="LMARGIN", new_y="NEXT")
+    y = pdf.get_y()
+    for x, title, v in ((x0, "OPLAAIDATUM", n.loaded_on), (x0 + half, "AFLAAIDATUM", n.offloaded_on)):
+        pdf.rect(x, y, half, 8)
+        pdf.set_xy(x + 1.5, y + 1.5)
+        pdf.set_font("Helvetica", "", 7)
+        room = pdf.get_string_width(title) + 3
+        label(title, w=room)
+        value(_day(v), w=half - room - 3)
     name = f"afleweringsnota_{n.note_no}.pdf"
     return Response(bytes(pdf.output()), media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
