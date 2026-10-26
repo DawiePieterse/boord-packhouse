@@ -209,6 +209,7 @@ function show() {
   if (view === "pin") { pinEntry = ""; $("pinError").textContent = ""; renderPinDots(); }
   if (view !== "scan") stopCamera();
   if (view !== "palletstack") stopPalletScan();
+  if (view !== "deliverynote") stopSealScan();
   if (view === "scan") $("scanMsg").textContent = "";
   if (view === "sulfur") renderSulfur(true);
   if (view === "acid") renderAcid(true);

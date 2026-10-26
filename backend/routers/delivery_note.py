@@ -16,7 +16,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from sqlmodel import Session, SQLModel, select
+from sqlmodel import Session, SQLModel, func, select
 
 from db import get_packhouse_session
 from models import DeliveryNote, DeliveryNoteSettings, Pallet, Receiver, Transporter
@@ -156,12 +156,15 @@ def state(session: Session = Depends(get_packhouse_session)):
 @router.get("/options")
 def options(session: Session = Depends(get_packhouse_session)):
     """What a new note picks from (Settings -> Delivery Note): the transporters
-    and receivers in use, and the cooled-to temperature it starts with."""
+    and receivers in use, the cooled-to temperature it starts with, and the
+    highest note number ever used (the phones only hold 90 days of notes), so
+    the next one follows on after a quiet spell too."""
     def active(model):
         return session.exec(select(model).where(model.active == True).order_by(model.sort, model.id)).all()  # noqa: E712
     settings = session.get(DeliveryNoteSettings, 1)
     return {"transporters": active(Transporter), "receivers": active(Receiver),
-            "cooled_to": settings.cooled_to if settings else 8.0}
+            "cooled_to": settings.cooled_to if settings else 8.0,
+            "last_no": session.exec(select(func.max(DeliveryNote.note_no))).one()}
 
 
 # The printed parts of the paper note.

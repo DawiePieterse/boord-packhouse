@@ -15,18 +15,23 @@
 // palletCartons, palletKg, kgText and sum from consignment.js.
 
 let dn = { view: "list", draft: null };
+let sealScanner = null;
 
 const dnToday = () => new Date(Store.now()).toLocaleDateString("en-CA"); // YYYY-MM-DD, farm-local
 const dnDay = (v) => (v ? v.split("-").reverse().join("/") : "");
-// The number runs on from the highest note: typed once, carrying on from the paper book.
+// The number is typed on the first note (carrying on from the paper book), and
+// every new note after it offers the highest so far + 1: this phone's notes,
+// or the highest the server has ever had.
 function nextNoteNo() {
-  const used = Store.notes().map((n) => n.note_no);
-  return used.length ? String(Math.max(...used) + 1) : "";
+  const used = [...Store.notes().map((n) => n.note_no), Store.noteOptions().last_no || 0];
+  const last = Math.max(...used);
+  return last ? String(last + 1) : "";
 }
 const receiverText = (r) => [r.name, r.market, r.city].filter(Boolean).join("\n");
 const noteTotals = (pallets) => `<b>${pallets.length}</b> pallet${pallets.length === 1 ? "" : "s"} · <b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b>`;
 
 function renderDeliveryNote() {
+  stopSealScan(); // the form is redrawn: its camera box goes with it
   renderOperatorBar($("deliveryOperatorBar"));
   $("deliveryOperatorBar").classList.toggle("hidden", dn.view === "note");
   $("deliveryBody").innerHTML = dn.view === "note" ? noteForm() : notesView();
@@ -114,9 +119,12 @@ function noteForm() {
       </div>
       ${label("Receiver", select("receiver", receiverChoices(d), d.receiver_id, "Receiver...", (r) => (r.text || receiverText(r)).split("\n").join(" · ")))}
       <div class="flex gap-2">
-        ${label("Seal no", input("seal_no"), "flex-1 min-w-0")}
+        ${label("Seal no", `<span class="flex gap-2">${input("seal_no", `placeholder="Scan or type"`)}
+          <button type="button" data-scanseal title="Scan the seal's barcode" class="px-3 rounded-lg border border-slate-300"><i class="fa-solid fa-barcode text-xl"></i></button></span>`, "flex-1 min-w-0")}
         ${label("Cooled to (°C)", input("cooled_to", `inputmode="decimal" maxlength="5"`), "w-28 shrink-0")}
       </div>
+      <div id="sealReader" class="hidden w-full rounded-lg overflow-hidden bg-black min-h-[200px]"></div>
+      <div id="sealMsg" class="text-sm text-red-600 empty:hidden"></div>
       <div class="flex gap-2">
         ${label("Loaded", input("loaded_on", `type="date"`), "flex-1 min-w-0")}
         ${label("Offloaded", input("offloaded_on", `type="date"`), "flex-1 min-w-0")}
@@ -136,6 +144,43 @@ function noteForm() {
       ${d.note ? `<button type="button" data-pdf class="w-full border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-share-from-square"></i> Print or share</button>
                   <button type="button" data-removenote class="w-full border border-red-300 text-red-700 rounded-xl py-3 font-semibold">Delete delivery note</button>` : ""}
     </div>`;
+}
+
+// The seal's barcode, scanned like a pallet label (consignment.js). A browser
+// only hands out the camera on https (or localhost): on the farm that is the
+// Tailscale address.
+async function startSealScan() {
+  const msg = $("sealMsg");
+  if (!window.isSecureContext) { msg.textContent = "Scanning needs the secure https://...ts.net:8060/ address - check Tailscale is connected, or type the number."; return; }
+  if (sealScanner) return;
+  msg.textContent = "";
+  $("sealReader").classList.remove("hidden");
+  const F = Html5QrcodeSupportedFormats;
+  sealScanner = new Html5Qrcode("sealReader", { formatsToSupport: [F.CODE_128, F.CODE_39, F.ITF, F.EAN_13, F.QR_CODE], verbose: false });
+  try {
+    await sealScanner.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 280, height: 110 } }, onSealCode, () => {});
+  } catch (e) {
+    sealScanner = null;
+    $("sealReader").classList.add("hidden");
+    msg.textContent = "Camera unavailable - allow camera access, then tap the barcode button, or type the number.";
+  }
+}
+
+function stopSealScan() {
+  const s = sealScanner;
+  sealScanner = null;
+  const reader = document.getElementById("sealReader");
+  if (reader) reader.classList.add("hidden");
+  if (s) try { Promise.resolve(s.stop()).then(() => s.clear()).catch(() => {}); } catch (_) { /* never started */ }
+}
+
+function onSealCode(text) {
+  if (!sealScanner) return; // the camera reports a code many times a second
+  stopSealScan();
+  Boord.beepScanned();
+  dn.draft.seal_no = text.trim();
+  document.querySelector('#deliveryBody [data-field="seal_no"]').value = dn.draft.seal_no;
+  $("sealMsg").textContent = "";
 }
 
 async function saveNote() {
@@ -208,6 +253,7 @@ function onDeliveryClick(ev) {
     renderDeliveryNote();
     window.scrollTo(0, y); // ticking a pallet far down the list must not jump to the top
   }
+  else if ("scanseal" in t.dataset) (sealScanner ? stopSealScan() : startSealScan());
   else if ("savenote" in t.dataset) saveNote();
   else if ("pdf" in t.dataset) shareNote();
   else if ("removenote" in t.dataset) removeNote();

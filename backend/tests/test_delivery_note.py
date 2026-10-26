@@ -80,7 +80,7 @@ def test_pdf_is_the_paper_note(client, pallets):
 
 def test_options_come_from_settings_which_need_the_pin(client, admin_client):
     o = client.get("/api/deliverynote/options").json()
-    assert ([t["name"] for t in o["transporters"]], o["cooled_to"]) == (["Self", "Go Fresh"], 8.0)
+    assert ([t["name"] for t in o["transporters"]], o["cooled_to"], o["last_no"]) == (["Self", "Go Fresh"], 8.0, None)
     assert (o["receivers"][1]["market"], o["receivers"][1]["city"]) == ("Tshwane Mark", "Pretoria")
     r = admin_client.post("/api/settings/receivers", json={"name": " Dapper ", "market": "Joburg Mark", "city": "Johannesburg"})
     assert r.json()["name"] == "Dapper"
@@ -101,3 +101,8 @@ def test_delete_only_what_no_live_note_uses(client, admin_client, pallets):
     assert admin_client.delete("/api/settings/transporters/1").status_code == 200
     sync(client, note(removed=True))
     assert admin_client.delete("/api/settings/receivers/2").status_code == 200
+
+
+def test_last_number_is_the_highest_ever_used(client, pallets):
+    sync(client, note(), note("n2", 1400, pallets=("p2",), removed=True))
+    assert client.get("/api/deliverynote/options").json()["last_no"] == 1400
