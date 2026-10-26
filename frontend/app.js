@@ -5,8 +5,9 @@
 // hash (#sulfur, #settings/backup), so the browser's own back button works
 // too.
 //
-// Sulfur tent (sulfur.js) and Acid bath (acid.js) are built, with their
-// offline sync in sync.js; the other roles are placeholders until their stage of Boord_Packhouse_App_Plan.md.
+// Sulfur tent (sulfur.js), Acid bath (acid.js), Pallet Stack (consignment.js)
+// and Delivery Note (deliverynote.js) are built, with their offline sync in
+// sync.js; the other roles are placeholders until their stage of Boord_Packhouse_App_Plan.md.
 
 const $ = (id) => document.getElementById(id);
 const esc = (v) => Boord.escapeHtml(v);
@@ -20,7 +21,7 @@ const MODULES = [
   { id: "sulfur",   name: "Sulfur tent",         icon: "fa-tent",                     blurb: "Load a run, dose, countdown and overrun alarm.", built: true, parked: true },
   { id: "acid",     name: "Acid bath",           icon: "fa-flask",                    blurb: "Batches, dip and drying timers, chemical changes.", built: true, parked: true },
   { id: "palletstack", name: "Pallet Stack",   icon: "",                  iconHtml: PALLET_BOXES, blurb: "Pallets and cartons grouped into a pallet stack.", built: true },
-  { id: "deliverynote", name: "Delivery Note",   icon: "fa-file-lines",               blurb: "Delivery note for a load leaving the farm." },
+  { id: "deliverynote", name: "Delivery Note",   icon: "fa-file-lines",               blurb: "Delivery note for a load leaving the farm.", built: true },
 ];
 
 function renderHome() {
@@ -184,13 +185,13 @@ function show() {
   // Roles that open with a badge scan. Off their screens the operator stays
   // signed in for a 10-minute grace period (Operator.leave), so popping out
   // to Home needs no rescan.
-  const BADGED = ["sulfur", "acid", "palletstack"];
+  const BADGED = ["sulfur", "acid", "palletstack", "deliverynote"];
   if (!BADGED.some((id) => hash === `#${id}`)) Operator.leave();
   const badged = m && BADGED.includes(m.id);
   const view = inSettings ? (unlocked ? "settings" : "pin")
     : badged ? (Operator.current() ? m.id : "scan")
     : m ? "module" : "home";
-  for (const id of ["home", "module", "scan", "sulfur", "acid", "palletstack", "pin", "settings"]) $(id).classList.toggle("hidden", id !== view);
+  for (const id of ["home", "module", "scan", "sulfur", "acid", "palletstack", "deliverynote", "pin", "settings"]) $(id).classList.toggle("hidden", id !== view);
   // The settings menu replaces the main one only once the PIN is in; the
   // PIN pad keeps the main menu so Home is one tap away.
   $("mainNav").classList.toggle("hidden", view === "settings");
@@ -211,6 +212,7 @@ function show() {
   if (view === "sulfur") renderSulfur(true);
   if (view === "acid") renderAcid(true);
   if (view === "palletstack") renderConsignment();
+  if (view === "deliverynote") renderDeliveryNote();
   if (view === "settings") {
     touchSettings();
     document.querySelectorAll("[data-settings-page]").forEach((el) =>
@@ -253,6 +255,7 @@ Boord.boot(() => {
   initSulfur();
   initAcid();
   initConsignment();
+  initDeliveryNote();
   // Never inherit a sign-in: a tablet reloaded (or an installed app reopened)
   // may still hold the session cookie, and the next person must type the PIN.
   Boord.api("/api/admin/logout", { method: "POST" }).catch(() => {});

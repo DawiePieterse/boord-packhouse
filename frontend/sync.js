@@ -3,7 +3,8 @@
 // - What the screens need is cached in localStorage and refreshed whenever
 //   the server answers: Boord's workers (badge scan), tents, fruit sources,
 //   the suggested-time settings, the weather, the server's sulfur runs, the
-//   acid baths and their state, the consignments and the packs and markets.
+//   acid baths and their state, the consignments and the packs and markets,
+//   and the delivery notes.
 // - Records made on this tablet - sulfur runs, and acid batches, chemical
 //   changes and checks (marked by `kind`) - go to the IndexedDB outbox
 //   (idb.js) and are sent by syncNow() every SYNC_EVERY_MS, and at once after
@@ -85,6 +86,7 @@ const Store = (() => {
     ["/api/acid/sync", (rows) => ({ batches: ofKind(rows, "acid_batch"), changes: ofKind(rows, "acid_change"),
                                     checks: ofKind(rows, "acid_check") })],
     ["/api/consignment/sync", (rows) => ({ consignments: ofKind(rows, "consignment"), pallets: ofKind(rows, "pallet") })],
+    ["/api/deliverynote/sync", (rows) => ({ notes: ofKind(rows, "delivery_note") })],
   ];
 
   // The server's list with this tablet's own copies merged in, the local
@@ -175,6 +177,7 @@ const Store = (() => {
       keep("ph_packaging", await Boord.api("/api/packaging"));
       keep("ph_markets", await Boord.api("/api/markets"));
       keep("ph_suppliers", await Boord.api("/api/suppliers"));
+      keep("ph_notes", await Boord.api("/api/deliverynote/state"));
       if (Date.now() - lastWorkers > WORKERS_EVERY_MS) await refreshWorkers();
       if (failed) throw failed;
       const left = (await IDB.pending().catch(() => [])).length;
@@ -236,6 +239,9 @@ const Store = (() => {
     packaging: () => cached("ph_packaging", []),
     markets: () => cached("ph_markets", []),
     suppliers: () => cached("ph_suppliers", []),
+    // Delivery notes, edited like pallets, newest first.
+    notes: () => liveMerged(cached("ph_notes", {}).notes || [], "delivery_note").filter((n) => !n.removed)
+      .sort((a, b) => (a.created_at < b.created_at ? 1 : -1)),
 
     // Make or update a record: into the outbox first, then try to send it.
     async saveRun(r) {

@@ -35,6 +35,7 @@ if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
 <script src="sulfur.js"></script>
 <script src="acid.js"></script>
 <script src="consignment.js"></script>
+<script src="deliverynote.js"></script>
 </head>
 <body class="bg-slate-100 min-h-screen pb-20">
 
@@ -97,6 +98,12 @@ if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
   <section id="palletstack" class="hidden max-w-xl mx-auto space-y-3">
     <div id="consignmentOperatorBar" class="bg-white rounded-2xl shadow p-3 flex items-center gap-3"></div>
     <div id="consignmentBody" class="space-y-3"></div>
+  </section>
+
+  <!-- Delivery Note: the recent notes, or one note (deliverynote.js). -->
+  <section id="deliverynote" class="hidden max-w-xl mx-auto space-y-3">
+    <div id="deliveryOperatorBar" class="bg-white rounded-2xl shadow p-3 flex items-center gap-3"></div>
+    <div id="deliveryBody" class="space-y-3"></div>
   </section>
 
   <!-- Settings PIN: four digits on a keypad big enough for gloves. -->

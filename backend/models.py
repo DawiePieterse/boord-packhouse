@@ -261,3 +261,29 @@ class Pallet(SQLModel, table=True):
     pallet_no: Optional[int] = None
     device: str = ""
     synced_at: Optional[datetime] = None
+
+
+class DeliveryNote(SQLModel, table=True):
+    """The paper delivery note (Afleweringsnota), made on a phone with its own
+    uuid and sent by POST /api/deliverynote/sync like a pallet: editable, the
+    latest copy wins. note_no is the number on the note, typed once (carrying
+    on from the paper book) and then offered as the highest + 1; unique among
+    live notes. lines is a JSON list of {count, description}: "120" x "1kg XL
+    TMR Litchis". Dates are farm-local "YYYY-MM-DD"."""
+    uuid: str = Field(primary_key=True)
+    note_no: int
+    created_at: datetime
+    receiver: str = ""          # Ontvanger, several lines
+    transporter: str = ""
+    seal_no: str = ""
+    cooled_to: str = ""         # Verkoel op, in °C
+    loaded_on: str = ""         # Oplaaidatum
+    offloaded_on: str = ""      # Aflaaidatum, optional
+    lines: str = "[]"
+    made_by: str = ""           # Boord worker.id from the badge of who made it; never changes
+    made_by_name: str = ""
+    changed_by: str = ""
+    changed_by_name: str = ""
+    removed: bool = False
+    device: str = ""
+    synced_at: Optional[datetime] = None

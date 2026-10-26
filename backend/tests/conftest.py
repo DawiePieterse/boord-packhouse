@@ -70,7 +70,7 @@ def client():
     from sqlmodel import Session, delete, select
 
     from db import packhouse_engine
-    from models import (AcidBatch, Bath, BathCheck, ChemicalChange, Consignment, Market, Packaging, Pallet,
+    from models import (AcidBatch, Bath, BathCheck, ChemicalChange, Consignment, DeliveryNote, Market, Packaging, Pallet,
                         SulfurRun, SulfurSettings, Tent)
 
     with TestClient(main.app, base_url="https://testserver") as c:
@@ -85,7 +85,7 @@ def client():
                 t.name, t.active, t.sort, t.default_grams, t.default_minutes, t.default_crates = (
                     f"Tent {letter}", True, i, 425.0, 60, 24)
                 s.add(t)
-            for model in (AcidBatch, ChemicalChange, BathCheck, Pallet, Consignment):
+            for model in (AcidBatch, ChemicalChange, BathCheck, Pallet, Consignment, DeliveryNote):
                 s.exec(delete(model))
             # Back to the two seeded baths.
             s.exec(delete(Bath).where(Bath.id > 2))
