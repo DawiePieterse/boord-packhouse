@@ -86,14 +86,16 @@ def test_supplier_is_kept_and_can_change(client):
     assert (c["supplier_id"], c["supplier_name"]) == (2, "Jansen Boerdery")
 
 
-def test_pallet_number_is_unique_within_its_stack_only(client):
+def test_pallet_number_is_unique_for_the_season_across_stacks(client):
     sync(client, [cons(), cons("c2")], [pallet("p1")])
-    out = sync(client, pallets=[pallet("p2", barcode="B2", pallet_ref="001")])
-    assert "already on this stack" in out["rejected"][0]["error"]
-    # the same number on another stack, or on a pallet taken off, is fine
-    assert sync(client, pallets=[{**pallet("p3", barcode="B3", pallet_ref="001"), "consignment_uuid": "c2"}])["synced"] == ["p3"]
+    out = sync(client, pallets=[{**pallet("p3", barcode="B3", pallet_ref="001"), "consignment_uuid": "c2"}])
+    assert "already used this season" in out["rejected"][0]["error"]
+    # a number can be edited, e.g. to start at 100 and go on from there
+    assert sync(client, pallets=[pallet("p1", pallet_ref="100"), pallet("p2", barcode="B2", pallet_ref="101")])["synced"] == ["p1", "p2"]
+    assert [p["pallet_ref"] for p in state(client)["pallets"]] == ["100", "101"]
+    # a pallet taken off frees its number
     sync(client, pallets=[pallet("p1", removed=True)])
-    assert sync(client, pallets=[pallet("p2", barcode="B2", pallet_ref="001")])["synced"] == ["p2"]
+    assert sync(client, pallets=[pallet("p4", barcode="B4", pallet_ref="100")])["synced"] == ["p4"]
 
 
 def test_unknown_market_is_rejected(client):

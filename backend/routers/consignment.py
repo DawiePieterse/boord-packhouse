@@ -74,11 +74,14 @@ def _pallet_problem(rec: PalletIn, session: Session) -> Optional[str]:
     if not rec.removed:
         if not (len(rec.pallet_ref) == 3 and rec.pallet_ref.isascii() and rec.pallet_ref.isdigit()):
             return "the pallet number is 3 digits"
-        twin = session.exec(select(Pallet).where(Pallet.consignment_uuid == rec.consignment_uuid,
-                                                 Pallet.pallet_ref == rec.pallet_ref, Pallet.uuid != rec.uuid,
-                                                 Pallet.removed == False)).first()  # noqa: E712
+        # Unique across every stack in the season (the farm-local year the pallet
+        # was scanned in: litchi season sits inside one calendar year). A pallet
+        # taken off frees its number.
+        season = to_local(_utc_naive(rec.scanned_at)).year
+        twin = session.exec(select(Pallet).where(Pallet.pallet_year == season, Pallet.pallet_ref == rec.pallet_ref,
+                                                 Pallet.uuid != rec.uuid, Pallet.removed == False)).first()  # noqa: E712
         if twin is not None:
-            return f"pallet {rec.pallet_ref} is already on this stack"
+            return f"pallet {rec.pallet_ref} is already used this season"
         problem = _lines_problem(rec.lines)
         if problem:
             return problem

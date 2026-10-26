@@ -13,7 +13,14 @@
 let cn = { view: "list", consignment: null, draft: null };
 let palletScanner = null;
 
-const pad = (n) => (n == null ? "..." : String(n).padStart(4, "0"));
+// The pallet number is typed once and then runs on: 001, 002... (or from 100).
+// Unique for the season (the calendar year it was scanned in) across every stack.
+const seasonOf = (iso) => new Date(iso).getFullYear();
+const seasonPallets = (season) => Store.pallets().filter((p) => seasonOf(p.scanned_at) === season);
+function nextRef() {
+  const used = seasonPallets(seasonOf(nowIso())).map((p) => Number(p.pallet_ref)).filter((n) => n >= 1);
+  return String(Math.min(999, (used.length ? Math.max(...used) : 0) + 1)).padStart(3, "0");
+}
 const nowIso = () => new Date(Store.now()).toISOString();
 const sum = (rows, f) => rows.reduce((n, r) => n + f(r), 0);
 const palletCartons = (p) => sum(p.lines, (l) => l.cartons);
@@ -68,10 +75,10 @@ function detailView(c) {
     : suppliers.some((s) => s.id === c.supplier_id) ? suppliers : [{ id: c.supplier_id, name: c.supplier_name }, ...suppliers];
   const rows = pallets.map((p) => `
     <button type="button" data-pallet="${esc(p.uuid)}" class="w-full text-left border-t py-3 flex gap-3 items-start active:bg-slate-50">
-      <div class="w-14 shrink-0"><div class="font-bold text-lg">${esc(p.pallet_ref || "---")}</div><div class="text-xs text-slate-400">${pad(p.pallet_no)}</div></div>
+      <div class="font-bold text-lg w-14 shrink-0">${esc(p.pallet_ref || "---")}</div>
       <div class="flex-1 min-w-0">
-        ${p.lines.map((l) => `<div class="text-sm">${esc(l.packaging_name)} <b>${l.cartons}</b></div>`).join("")}
-        <div class="text-xs text-slate-400 truncate">${esc(p.barcode)}</div>
+        ${p.lines.map((l, i) => `<span data-li="${i}" class="block text-sm py-1 underline decoration-dotted decoration-slate-300">${esc(l.packaging_name)} <b>${l.cartons}</b></span>`).join("")}
+        <div class="text-xs text-slate-400 truncate">Barcode ${esc(p.barcode)}</div>
       </div>
       <div class="text-right text-sm shrink-0"><div class="font-semibold">${palletCartons(p)}</div><div class="text-slate-500">${kgText(palletKg(p))}</div></div>
     </button>`).join("");
@@ -91,16 +98,17 @@ function detailView(c) {
         <span><b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b></span></div>
       <button type="button" data-add class="w-full boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-barcode"></i> Scan a pallet</button>
     </div>
-    ${pallets.length ? `<div class="bg-white rounded-2xl shadow px-4 pb-1"><div class="text-xs text-slate-500 pt-3 pb-2">Pallet · what is on it · cartons / weight. Tap one to change it.</div>${rows}</div>` : ""}`;
+    ${pallets.length ? `<div class="bg-white rounded-2xl shadow px-4 pb-1"><div class="text-xs text-slate-500 pt-3 pb-2">Pallet · what is on it · cartons / weight. Tap a pack to change or delete it, or the pallet to change all of it.</div>${rows}</div>` : ""}`;
 }
 
 // ---- A pallet: scan its label, then what is on it ---------------------------
 
-function openPallet(pallet) {
+function openPallet(pallet, line) {
   cn.view = "pallet";
+  cn.focusLine = line == null ? null : line; // the pack tapped in the stack, highlighted in the form
   cn.draft = pallet
     ? { uuid: pallet.uuid, pallet, barcode: pallet.barcode, ref: pallet.pallet_ref || "", lines: pallet.lines.map((l) => ({ packaging_id: l.packaging_id, cartons: l.cartons })) }
-    : { uuid: Boord.uuid(), pallet: null, barcode: "", ref: "", lines: [{ packaging_id: null, cartons: "" }] };
+    : { uuid: Boord.uuid(), pallet: null, barcode: "", ref: nextRef(), lines: [{ packaging_id: null, cartons: "" }] };
   renderConsignment();
   if (!pallet) startPalletScan();
 }
@@ -130,23 +138,24 @@ function palletForm() {
   const d = cn.draft;
   const packs = packChoices(d);
   const lines = d.lines.map((l, i) => `
-    <div class="flex gap-2 items-center" data-line="${i}">
+    <div class="flex gap-2 items-center rounded-lg${i === cn.focusLine ? " ring-2 ring-blue-400 p-1" : ""}" data-line="${i}">
       <select data-field="pack" class="flex-1 min-w-0 border border-slate-300 rounded-lg p-3 text-lg">
         <option value="">Pack...</option>
         ${packs.map((p) => `<option value="${p.id}"${p.id === l.packaging_id ? " selected" : ""}>${esc(p.name)}</option>`).join("")}
       </select>
       <input data-field="cartons" type="number" inputmode="numeric" min="1" step="1" placeholder="Cartons" value="${esc(l.cartons)}" class="w-28 border border-slate-300 rounded-lg p-3 text-lg">
-      ${d.lines.length > 1 ? `<button type="button" data-drop="${i}" class="px-3 py-3 text-slate-400"><i class="fa-solid fa-xmark"></i></button>` : ""}
+      <button type="button" data-drop="${i}" title="Delete this pack" class="px-3 py-3 text-slate-400"><i class="fa-solid fa-trash-can"></i></button>
     </div>`).join("");
   return `
     <div class="flex items-center gap-3">
       <button type="button" data-cancel class="px-3 py-2 rounded-lg border border-slate-300 bg-white"><i class="fa-solid fa-arrow-left"></i></button>
-      <div class="font-semibold">${d.pallet ? `Pallet ${esc(d.pallet.pallet_ref || pad(d.pallet.pallet_no))}` : "New pallet"}</div>
+      <div class="font-semibold">${d.pallet ? `Pallet ${esc(d.pallet.pallet_ref || "")}` : "New pallet"}</div>
     </div>
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
       <div id="palletReader" class="hidden w-full rounded-lg overflow-hidden bg-black min-h-[200px]"></div>
       <label class="block"><span class="text-sm font-semibold text-slate-600">Pallet number</span>
         <input data-field="ref" value="${esc(d.ref)}" inputmode="numeric" maxlength="3" pattern="[0-9]{3}" placeholder="001" class="w-full border border-slate-300 rounded-lg p-3 text-lg"></label>
+      <div class="text-sm font-semibold text-slate-600 -mb-2">Barcode</div>
       <div class="flex gap-2">
         <input data-field="barcode" value="${esc(d.barcode)}" inputmode="numeric" placeholder="Scan the pallet label" class="flex-1 min-w-0 border border-slate-300 rounded-lg p-3 text-lg">
         <button type="button" data-scan class="px-4 rounded-lg border border-slate-300"><i class="fa-solid fa-barcode text-xl"></i></button>
@@ -203,7 +212,7 @@ function onPalletCode(text) {
   const other = palletWithCode(code, cn.draft.uuid);
   if (other) {
     Boord._tone(220, 0.35);
-    $("palletScanMsg").textContent = `That label is already on pallet ${pad(other.pallet_no)}.`;
+    $("palletScanMsg").textContent = `That label is already on pallet ${other.pallet_ref}.`;
     return;
   }
   stopPalletScan();
@@ -220,13 +229,13 @@ async function savePallet() {
   const fail = (m) => { $("palletScanMsg").textContent = m; };
   if (!/^\d{3}$/.test(d.ref)) return fail("The pallet number is 3 digits, like 001.");
   if (!barcode) return fail("Scan the pallet label first.");
-  const twin = palletsOf({ uuid: d.pallet ? d.pallet.consignment_uuid : cn.consignment }).find((p) => p.pallet_ref === d.ref && p.uuid !== d.uuid);
-  if (twin) return fail(`Pallet ${d.ref} is already on this stack.`);
+  const twin = seasonPallets(d.pallet ? seasonOf(d.pallet.scanned_at) : seasonOf(nowIso())).find((p) => p.pallet_ref === d.ref && p.uuid !== d.uuid);
+  if (twin) return fail(`Pallet ${d.ref} is already used this season.`);
   if (!lines.length) return fail("Pick a pack and the number of cartons.");
   // A line with only one of the two is a slip, not a blank line to skip.
   if (d.lines.some((l) => (l.packaging_id != null) !== (Number(l.cartons) >= 1))) return fail("Every line needs a pack and a number of cartons.");
   const other = palletWithCode(barcode, d.uuid);
-  if (other) return fail(`That label is already on pallet ${pad(other.pallet_no)}.`);
+  if (other) return fail(`That label is already on pallet ${other.pallet_ref}.`);
   stopPalletScan();
   await Store.saveRun({ ...(d.pallet || { kind: "pallet", consignment_uuid: cn.consignment, scanned_at: nowIso() }),
                         kind: "pallet", uuid: d.uuid, barcode, lines, pallet_ref: d.ref, removed: false, rev: Date.now() });
@@ -262,6 +271,8 @@ async function changeConsignment(c, change) {
 function onConsignmentClick(ev) {
   const t = ev.target.closest("button");
   if (!t) return;
+  const li = ev.target.closest("[data-li]");
+  if (li && t.dataset.pallet) { openPallet(Store.pallets().find((p) => p.uuid === t.dataset.pallet), Number(li.dataset.li)); return; }
   const d = cn.draft;
   const sync = () => { cn.draft.lines = cn.draft.lines.slice(); renderConsignment(); };
   if (t.dataset.open) { cn = { view: "detail", consignment: t.dataset.open, draft: null }; renderConsignment(); }
@@ -271,7 +282,12 @@ function onConsignmentClick(ev) {
   else if ("cancel" in t.dataset) { cn.view = "detail"; renderConsignment(); }
   else if ("scan" in t.dataset) startPalletScan();
   else if ("addline" in t.dataset) { d.lines.push({ packaging_id: null, cartons: "" }); sync(); }
-  else if (t.dataset.drop) { d.lines.splice(Number(t.dataset.drop), 1); sync(); }
+  else if (t.dataset.drop) {
+    d.lines.splice(Number(t.dataset.drop), 1);
+    if (!d.lines.length) d.lines.push({ packaging_id: null, cartons: "" }); // a pallet takes off the stack with its own button
+    cn.focusLine = null;
+    sync();
+  }
   else if ("save" in t.dataset) savePallet();
   else if ("remove" in t.dataset) removePallet();
 }
