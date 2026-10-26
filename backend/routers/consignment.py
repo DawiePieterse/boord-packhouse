@@ -7,7 +7,9 @@ editable (a rescan, a changed count, a pallet taken off), so the latest copy
 sent replaces the fields the phone owns. What the server owns, the pallet's
 year / number, is given once, the first time the pallet arrives.
 
-A pallet's barcode is unique among the pallets still on a consignment.
+A stack only groups pallets: each pallet has its own supplier and market, and
+each of its lines (pack, cartons) its own block. A pallet's barcode is unique
+among the pallets still on a consignment.
 """
 import json
 from datetime import datetime, timedelta
@@ -29,10 +31,6 @@ LISTED = timedelta(days=90)
 
 class ConsignmentIn(SQLModel):
     uuid: str
-    market_id: int
-    market_name: str = ""
-    supplier_id: Optional[int] = None
-    supplier_name: str = ""
     created_at: datetime
 
 
@@ -42,9 +40,10 @@ class PalletIn(SQLModel):
     barcode: str
     scanned_at: datetime
     pallet_ref: str = ""
-    block_id: Optional[str] = None
-    block_name: str = ""
-    variety: str = ""
+    supplier_id: Optional[int] = None
+    supplier_name: str = ""
+    market_id: Optional[int] = None
+    market_name: str = ""
     date_code: str = ""
     lines: list = []
     removed: bool = False
@@ -86,6 +85,10 @@ def _pallet_problem(rec: PalletIn, session: Session) -> Optional[str]:
                                                  Pallet.uuid != rec.uuid, Pallet.removed == False)).first()  # noqa: E712
         if twin is not None:
             return f"pallet {rec.pallet_ref} is already used this season"
+        if rec.supplier_id is None:
+            return "a pallet needs its supplier"
+        if rec.market_id is None or session.get(Market, rec.market_id) is None:
+            return "unknown market"
         problem = _lines_problem(rec.lines)
         if problem:
             return problem
@@ -113,15 +116,11 @@ def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
     now = _now()
     synced, rejected = [], []
     for rec in body.consignments:
-        if not rec.uuid or len(rec.uuid) > 64 or session.get(Market, rec.market_id) is None:
-            rejected.append({"uuid": rec.uuid, "error": "unknown market" if rec.uuid else "bad uuid"})
+        if not rec.uuid or len(rec.uuid) > 64:
+            rejected.append({"uuid": rec.uuid, "error": "bad uuid"})
             continue
-        row = session.get(Consignment, rec.uuid)
-        if row is None:
-            row = Consignment(uuid=rec.uuid, created_at=_utc_naive(rec.created_at), device=body.device, synced_at=now)
-        row.market_id, row.market_name = rec.market_id, rec.market_name
-        row.supplier_id, row.supplier_name = rec.supplier_id, rec.supplier_name
-        session.add(row)
+        if session.get(Consignment, rec.uuid) is None:
+            session.add(Consignment(uuid=rec.uuid, created_at=_utc_naive(rec.created_at), device=body.device, synced_at=now))
         synced.append(rec.uuid)
     session.flush()  # a pallet sent in the same pass finds its consignment
     for rec in body.pallets:
@@ -138,7 +137,8 @@ def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
         row.barcode, row.removed = rec.barcode.strip(), rec.removed
         if not rec.removed:
             row.lines, row.pallet_ref = json.dumps(rec.lines), rec.pallet_ref
-            row.block_id, row.block_name, row.variety, row.date_code = rec.block_id, rec.block_name, rec.variety, rec.date_code
+            row.supplier_id, row.supplier_name = rec.supplier_id, rec.supplier_name
+            row.market_id, row.market_name, row.date_code = rec.market_id, rec.market_name, rec.date_code
         session.add(row)
         session.flush()  # the next new pallet counts this one
         synced.append(rec.uuid)

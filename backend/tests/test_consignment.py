@@ -13,14 +13,14 @@ NOW = datetime.now(timezone.utc)
 LINE = {"packaging_id": 1, "packaging_name": "Pre-pac", "carton_kg": 0.48, "cartons": 60}
 
 
-def cons(uuid="c1", **kw):
-    return {"uuid": uuid, "market_id": 1, "market_name": "USA Sea Freight", "supplier_id": 1,
-            "supplier_name": "Own fruit", "created_at": _iso(NOW), **kw}
+def cons(uuid="c1"):
+    return {"uuid": uuid, "created_at": _iso(NOW)}
 
 
 def pallet(uuid="p1", barcode="(00)060099005963004759", lines=None, **kw):
     return {"uuid": uuid, "consignment_uuid": "c1", "barcode": barcode, "scanned_at": _iso(NOW),
-            "pallet_ref": "00" + uuid[-1], "lines": [LINE] if lines is None else lines, **kw}
+            "pallet_ref": "00" + uuid[-1], "supplier_id": 1, "supplier_name": "Own fruit",
+            "market_id": 1, "market_name": "USA Sea Freight", "lines": [LINE] if lines is None else lines, **kw}
 
 
 def sync(client, consignments=(), pallets=()):
@@ -45,12 +45,11 @@ def test_sync_is_idempotent_and_numbers_pallets_once(client):
 
 def test_a_pallet_can_be_edited_but_keeps_its_number(client):
     sync(client, [cons()], [pallet()])
-    sync(client, [cons(market_id=5, market_name="Local")],
-         [pallet(barcode="NEW", lines=[{**LINE, "cartons": 61}])])
-    s = state(client)
-    assert s["consignments"][0]["market_name"] == "Local"
-    p = s["pallets"][0]
+    sync(client, pallets=[pallet(barcode="NEW", market_id=5, market_name="Local", supplier_id=2,
+                                 supplier_name="Jansen Boerdery", lines=[{**LINE, "cartons": 61}])])
+    p = state(client)["pallets"][0]
     assert p["pallet_no"] == 1 and p["barcode"] == "NEW" and p["lines"][0]["cartons"] == 61
+    assert (p["market_name"], p["supplier_id"], p["supplier_name"]) == ("Local", 2, "Jansen Boerdery")
 
 
 def test_barcode_is_unique_until_the_pallet_is_removed(client):
@@ -66,6 +65,7 @@ def test_barcode_is_unique_until_the_pallet_is_removed(client):
 @pytest.mark.parametrize("bad", [
     {"consignment_uuid": "nope"}, {"barcode": "  "}, {"lines": []},
     {"pallet_ref": ""}, {"pallet_ref": "12"}, {"pallet_ref": "1234"}, {"pallet_ref": "12a"},
+    {"supplier_id": None}, {"market_id": None}, {"market_id": 99},
     {"lines": [{**LINE, "cartons": 0}]}, {"lines": [{**LINE, "carton_kg": 0}]}, {"lines": [{**LINE, "packaging_name": ""}]},
 ])
 def test_bad_pallets_are_rejected_not_stored(client, bad):
@@ -77,13 +77,6 @@ def test_bad_pallets_are_rejected_not_stored(client, bad):
 def test_suppliers_come_from_boord_own_farm_first(client):
     assert client.get("/api/suppliers").json() == [
         {"id": 1, "name": "Own fruit", "is_own_farm": True}, {"id": 2, "name": "Jansen Boerdery", "is_own_farm": False}]
-
-
-def test_supplier_is_kept_and_can_change(client):
-    sync(client, [cons()])
-    sync(client, [cons(supplier_id=2, supplier_name="Jansen Boerdery")])
-    c = state(client)["consignments"][0]
-    assert (c["supplier_id"], c["supplier_name"]) == (2, "Jansen Boerdery")
 
 
 def test_pallet_number_is_unique_for_the_season_across_stacks(client):
@@ -98,16 +91,18 @@ def test_pallet_number_is_unique_for_the_season_across_stacks(client):
     assert sync(client, pallets=[pallet("p4", barcode="B4", pallet_ref="100")])["synced"] == ["p4"]
 
 
-def test_block_and_date_code_are_kept(client):
-    sync(client, [cons()], [pallet(block_id="15", block_name="Block 15", variety="Early Delight", date_code="4104")])
+def test_each_line_keeps_its_block_and_the_date_code_is_kept(client):
+    lines = [{**LINE, "block_id": "15", "block_name": "Block 15", "variety": "Early Delight"},
+             {**LINE, "packaging_name": "1kg XXL", "block_id": "7", "block_name": "Block 7", "variety": ""},
+             {**LINE, "block_id": None}]  # a block is optional
+    sync(client, [cons()], [pallet(lines=lines, date_code="4104")])
     p = state(client)["pallets"][0]
-    assert (p["block_id"], p["block_name"], p["variety"], p["date_code"]) == ("15", "Block 15", "Early Delight", "4104")
-    sync(client, pallets=[pallet(block_id=None)])  # a block can be cleared again
-    assert state(client)["pallets"][0]["block_id"] is None
+    assert [l["block_id"] for l in p["lines"]] == ["15", "7", None] and p["date_code"] == "4104"
 
 
-def test_unknown_market_is_rejected(client):
-    assert sync(client, [cons(market_id=99)])["rejected"][0]["error"] == "unknown market"
+def test_a_stack_is_only_its_uuid_and_date(client):
+    sync(client, [cons()])
+    assert set(state(client)["consignments"][0]) == {"uuid", "created_at", "device", "synced_at"}
 
 
 def test_settings_need_the_pin_and_floor_lists_do_not(client, admin_client):

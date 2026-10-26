@@ -93,7 +93,7 @@ if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
     <div id="bathCards" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
   </section>
 
-  <!-- Consignment: its list, one consignment's pallets, or one pallet (consignment.js). -->
+  <!-- Pallet Stack: the pallets, or one pallet (consignment.js). -->
   <section id="consignment" class="hidden max-w-xl mx-auto space-y-3">
     <div id="consignmentBody" class="space-y-3"></div>
   </section>
@@ -148,7 +148,7 @@ if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
       <div class="text-sm text-slate-500 px-1">What can be put on a pallet, and what a full carton really weighs (a 1 kg pack is about 1.1 kg with its packaging). A pallet keeps the weight it was saved with, so changing one here only affects pallets made afterwards.</div>
       <div id="packagingSettings" class="space-y-3"></div>
       <div class="text-lg font-bold px-1 pt-4">Markets</div>
-      <div class="text-sm text-slate-500 px-1">Where a pallet stack is going. One that is no longer used is switched off, never deleted.</div>
+      <div class="text-sm text-slate-500 px-1">Where a pallet is going. One that is no longer used is switched off, never deleted.</div>
       <div id="marketSettings" class="space-y-3"></div>
     </div>
 
