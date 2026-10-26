@@ -78,6 +78,7 @@ function detailView(c) {
       <div class="font-bold text-lg w-14 shrink-0">${esc(p.pallet_ref || "---")}</div>
       <div class="flex-1 min-w-0">
         ${p.lines.map((l, i) => `<span data-li="${i}" class="block text-sm py-1 underline decoration-dotted decoration-slate-300">${esc(l.packaging_name)} <b>${l.cartons}</b></span>`).join("")}
+        <div class="text-xs text-slate-500">${p.block_id ? `${esc(blockText(p))} · ` : ""}Date code ${esc(palletDateCode(p))}</div>
         <div class="text-xs text-slate-400 truncate">Barcode ${esc(p.barcode)}</div>
       </div>
       <div class="text-right text-sm shrink-0"><div class="font-semibold">${palletCartons(p)}</div><div class="text-slate-500">${kgText(palletKg(p))}</div></div>
@@ -107,8 +108,8 @@ function openPallet(pallet, line) {
   cn.view = "pallet";
   cn.focusLine = line == null ? null : line; // the pack tapped in the stack, highlighted in the form
   cn.draft = pallet
-    ? { uuid: pallet.uuid, pallet, barcode: pallet.barcode, ref: pallet.pallet_ref || "", lines: pallet.lines.map((l) => ({ packaging_id: l.packaging_id, cartons: l.cartons })) }
-    : { uuid: Boord.uuid(), pallet: null, barcode: "", ref: nextRef(), lines: [{ packaging_id: null, cartons: "" }] };
+    ? { uuid: pallet.uuid, pallet, barcode: pallet.barcode, ref: pallet.pallet_ref || "", block_id: pallet.block_id || "", lines: pallet.lines.map((l) => ({ packaging_id: l.packaging_id, cartons: l.cartons })) }
+    : { uuid: Boord.uuid(), pallet: null, barcode: "", ref: nextRef(), block_id: "", lines: [{ packaging_id: null, cartons: "" }] };
   renderConsignment();
   if (!pallet) startPalletScan();
 }
@@ -134,6 +135,22 @@ function draftLines(d) {
   });
 }
 
+// The blocks in the fruit received today and the last earlier receiving day
+// (the sulfur screen's list, Store.sources()), plus the pallet's own block if
+// it has since dropped off that list. Bought-in fruit has no block here: it is
+// the stack's supplier.
+function blockGroups(d) {
+  const groups = Store.sources().map((g) => ({ label: g.label, blocks: g.sources.filter((s) => s.block_id != null) }))
+    .filter((g) => g.blocks.length);
+  const saved = d.pallet && d.pallet.block_id;
+  if (saved && !groups.some((g) => g.blocks.some((b) => b.block_id === saved))) {
+    groups.push({ label: "Earlier", blocks: [{ block_id: saved, block_name: d.pallet.block_name, variety: d.pallet.variety }] });
+  }
+  return groups;
+}
+const blockText = (b) => `${b.block_name}${b.variety ? ` · ${b.variety}` : ""}`;
+const palletDateCode = (p) => (p && p.date_code) || dateCode(new Date(p ? p.scanned_at : nowIso()));
+
 function palletForm() {
   const d = cn.draft;
   const packs = packChoices(d);
@@ -155,6 +172,12 @@ function palletForm() {
       <div id="palletReader" class="hidden w-full rounded-lg overflow-hidden bg-black min-h-[200px]"></div>
       <label class="block"><span class="text-sm font-semibold text-slate-600">Pallet number</span>
         <input data-field="ref" value="${esc(d.ref)}" inputmode="numeric" maxlength="3" pattern="[0-9]{3}" placeholder="001" class="w-full border border-slate-300 rounded-lg p-3 text-lg"></label>
+      <div class="text-sm font-semibold text-slate-600 -mb-2">Block</div>
+      <select data-field="block" class="w-full border border-slate-300 rounded-lg p-3 text-lg">
+        <option value="">Block...</option>
+        ${blockGroups(d).map((g) => `<optgroup label="${esc(g.label)}">${g.blocks.map((b) => `<option value="${esc(b.block_id)}"${b.block_id === d.block_id ? " selected" : ""}>${esc(blockText(b))}</option>`).join("")}</optgroup>`).join("")}
+      </select>
+      <div class="text-sm"><span class="font-semibold text-slate-600">Date code</span> <b>${esc(palletDateCode(d.pallet))}</b></div>
       <div class="text-sm font-semibold text-slate-600 -mb-2">Barcode</div>
       <div class="flex gap-2">
         <input data-field="barcode" value="${esc(d.barcode)}" inputmode="numeric" placeholder="Scan the pallet label" class="flex-1 min-w-0 border border-slate-300 rounded-lg p-3 text-lg">
@@ -237,8 +260,10 @@ async function savePallet() {
   const other = palletWithCode(barcode, d.uuid);
   if (other) return fail(`That label is already on pallet ${other.pallet_ref}.`);
   stopPalletScan();
+  const block = blockGroups(d).flatMap((g) => g.blocks).find((b) => b.block_id === d.block_id);
   await Store.saveRun({ ...(d.pallet || { kind: "pallet", consignment_uuid: cn.consignment, scanned_at: nowIso() }),
-                        kind: "pallet", uuid: d.uuid, barcode, lines, pallet_ref: d.ref, removed: false, rev: Date.now() });
+                        kind: "pallet", uuid: d.uuid, barcode, lines, pallet_ref: d.ref, block_id: block ? block.block_id : null, block_name: block ? block.block_name : "",
+                        variety: block ? block.variety : "", date_code: palletDateCode(d.pallet), removed: false, rev: Date.now() });
   cn.view = "detail";
   renderConsignment();
 }
@@ -295,6 +320,7 @@ function onConsignmentClick(ev) {
 function onConsignmentInput(ev) {
   const f = ev.target.dataset.field;
   if (f === "barcode") { cn.draft.barcode = ev.target.value; return; }
+  if (f === "block") { cn.draft.block_id = ev.target.value; return; }
   if (f === "ref") { cn.draft.ref = ev.target.value.replace(/\D/g, "").slice(0, 3); ev.target.value = cn.draft.ref; return; }
   if (f) {
     const line = cn.draft.lines[Number(ev.target.closest("[data-line]").dataset.line)];

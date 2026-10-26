@@ -98,6 +98,14 @@ def test_pallet_number_is_unique_for_the_season_across_stacks(client):
     assert sync(client, pallets=[pallet("p4", barcode="B4", pallet_ref="100")])["synced"] == ["p4"]
 
 
+def test_block_and_date_code_are_kept(client):
+    sync(client, [cons()], [pallet(block_id="15", block_name="Block 15", variety="Early Delight", date_code="4104")])
+    p = state(client)["pallets"][0]
+    assert (p["block_id"], p["block_name"], p["variety"], p["date_code"]) == ("15", "Block 15", "Early Delight", "4104")
+    sync(client, pallets=[pallet(block_id=None)])  # a block can be cleared again
+    assert state(client)["pallets"][0]["block_id"] is None
+
+
 def test_unknown_market_is_rejected(client):
     assert sync(client, [cons(market_id=99)])["rejected"][0]["error"] == "unknown market"
 

@@ -248,7 +248,11 @@ class Pallet(SQLModel, table=True):
     barcode: str
     scanned_at: datetime
     lines: str = "[]"
-    pallet_ref: str = ""        # the 3-digit pallet number written on the sheet, unique within its consignment
+    pallet_ref: str = ""        # the 3-digit pallet number written on the sheet, unique for the season
+    block_id: Optional[str] = None   # the block the fruit came from, picked from the fruit received lately
+    block_name: str = ""
+    variety: str = ""
+    date_code: str = ""         # suggest.js's dateCode of the day scanned (4104 = Monday of week 44), kept as scanned
     removed: bool = False
     pallet_year: Optional[int] = None
     pallet_no: Optional[int] = None

@@ -42,6 +42,10 @@ class PalletIn(SQLModel):
     barcode: str
     scanned_at: datetime
     pallet_ref: str = ""
+    block_id: Optional[str] = None
+    block_name: str = ""
+    variety: str = ""
+    date_code: str = ""
     lines: list = []
     removed: bool = False
 
@@ -134,6 +138,7 @@ def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
         row.barcode, row.removed = rec.barcode.strip(), rec.removed
         if not rec.removed:
             row.lines, row.pallet_ref = json.dumps(rec.lines), rec.pallet_ref
+            row.block_id, row.block_name, row.variety, row.date_code = rec.block_id, rec.block_name, rec.variety, rec.date_code
         session.add(row)
         session.flush()  # the next new pallet counts this one
         synced.append(rec.uuid)
