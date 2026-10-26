@@ -176,22 +176,24 @@ SMALL_PRINT = ("Bekfontein Boerdery is nie verantwoordelik vir enige tekorte of 
                "'n epos na ons kantore.")
 
 
-def note_lines(n: DeliveryNote) -> list:
-    """The paper note's rows: each pallet (its total cartons, number, barcode,
-    supplier and market), then its lines; the cartons and kg all told last."""
-    rows, cartons, kg = [], 0, 0.0
-    for p in json.loads(n.pallets or "[]"):
-        pc = sum(ln["cartons"] for ln in p["lines"])
-        pk = sum(ln["cartons"] * ln["carton_kg"] for ln in p["lines"])
-        cartons, kg = cartons + pc, kg + pk
-        rows.append({"count": pc, "bold": True, "description":
-                     f"Pallet {p['pallet_ref']}  {p['date_code']}  {p['supplier_name']} - {p['market_name']}  ({round(pk, 1):g} kg)"})
-        rows.append({"count": "", "description": f"Barcode {p['barcode']}"})
-        for ln in p["lines"]:
-            text = ", ".join(t for t in (ln["packaging_name"], ln.get("block_name"), ln.get("variety")) if t)
-            rows.append({"count": ln["cartons"], "description": f"      {text}, Litchis"})
-    rows.append({"count": cartons, "bold": True, "description": f"Total: {len(json.loads(n.pallets or '[]'))} pallets, {round(kg, 1):g} kg"})
-    return rows
+def _kg(v: float) -> str:
+    """kg as the screens show it (en-ZA): 1 234,5."""
+    text = f"{round(v, 1):,.1f}".replace(",", " ").replace(".", ",")
+    return text[:-2] if text.endswith(",0") else text
+
+
+def _line_text(ln: dict) -> str:
+    """A pallet line as Pallet Stack shows it: 80 x 1kg XXL, Block 7, Mauritius, Litchis."""
+    block = f", {ln.get('block_name')}{', ' + ln['variety'] if ln.get('variety') else ''}" if ln.get("block_id") else ""
+    return f"{ln['cartons']} x {ln['packaging_name']}{block}, Litchis"
+
+
+def _cartons(p: dict) -> int:
+    return sum(ln["cartons"] for ln in p["lines"])
+
+
+def _pallet_kg(p: dict) -> float:
+    return sum(ln["cartons"] * ln["carton_kg"] for ln in p["lines"])
 
 
 def _day(v: str) -> str:
@@ -208,6 +210,7 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     pdf = FPDF(format="A5")
     pdf.set_margins(10, 10, 10)
     pdf.set_auto_page_break(True, margin=10)
+    pdf.alias_nb_pages()
     pdf.add_page()
     w = pdf.epw  # 128 mm
     half = w / 2
@@ -215,6 +218,14 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     def text(size, value, style="", h=5, **kw):
         pdf.set_font("Helvetica", style, size)
         pdf.cell(kw.pop("w", 0), h, _latin(value), **kw)
+
+    # One look throughout: printed labels small and upper case, what was
+    # filled in at one size, bold only for the pallet numbers and the total.
+    def label(value, **kw):
+        text(7, value, h=kw.pop("h", 5), **kw)
+
+    def value(v, style="", **kw):
+        text(10, v, style, h=kw.pop("h", 5), **kw)
 
     # Header: farm and contact, then the note's title and number.
     top = pdf.get_y()
@@ -229,62 +240,92 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     text(14, str(n.note_no), "B", h=7, new_x="LMARGIN", new_y="NEXT")
     pdf.set_text_color(0, 0, 0)
 
-    # Afsender | Ontvanger, then the three signatures.
-    y = pdf.get_y()
-    pdf.rect(pdf.l_margin, y, w, 34)
-    pdf.line(pdf.l_margin + half, y, pdf.l_margin + half, y + 34)
-    pdf.set_xy(pdf.l_margin + 1, y + 1)
-    text(7, "AFSENDER", h=4, new_x="LMARGIN", new_y="NEXT")
-    for line in SENDER:
-        pdf.set_x(pdf.l_margin + 12)
-        text(9, line, "B", h=5, new_x="LMARGIN", new_y="NEXT")
-    pdf.set_xy(pdf.l_margin + half + 1, y + 1)
-    text(7, "ONTVANGER", h=4)
-    pdf.set_xy(pdf.l_margin + half + 1, y + 6)
-    pdf.set_font("Helvetica", "", 10)
-    pdf.multi_cell(half - 2, 5, _latin(n.receiver.strip()), max_line_height=5)
-    y += 34
-    pdf.rect(pdf.l_margin, y, w, 12)
-    for i, label in enumerate(("HANDTEKENING AFSENDER", "HANDTEKENING ONTVANGER", "HANDTEKENING DRYWER")):
-        x = pdf.l_margin + i * w / 3
-        if i:
-            pdf.line(x, y, x, y + 12)
-        pdf.set_xy(x + 1, y + 1)
-        text(6, label, h=3)
-    y += 12
+    # Afsender | Ontvanger, the same way; under each, its signatures: the
+    # sender's under Afsender, the receiver's and the driver's under Ontvanger.
+    x0, y = pdf.l_margin, pdf.get_y()
+    pdf.rect(x0, y, w, 30)
+    pdf.line(x0 + half, y, x0 + half, y + 30)
+    for x, title, lines in ((x0, "AFSENDER", SENDER), (x0 + half, "ONTVANGER", n.receiver.strip().split("\n"))):
+        pdf.set_xy(x + 1.5, y + 1)
+        label(title, h=4)
+        for i, line in enumerate(lines[:5]):
+            pdf.set_xy(x + 1.5, y + 6 + i * 5)
+            value(line, w=half - 3)
+    y += 30
+    pdf.rect(x0, y, w, 13)
+    for x in (x0 + half, x0 + half * 1.5):
+        pdf.line(x, y, x, y + 13)
+    for x, title in ((x0, "HANDTEKENING AFSENDER"), (x0 + half, "HANDTEKENING ONTVANGER"), (x0 + half * 1.5, "HANDTEKENING DRYWER")):
+        pdf.set_xy(x + 1.5, y + 1)
+        text(5.5, title, h=3)
+    y += 13
 
     # Transporter, Seel Nr, Verkoel op.
-    pdf.rect(pdf.l_margin, y, w, 8)
-    pdf.set_xy(pdf.l_margin + 1, y + 1.5)
-    text(8, "TRANSPORTER:", "B", h=5, w=25)
-    text(10, n.transporter, h=5, w=29)
-    text(7, "SEEL NR", h=5, w=12)
+    pdf.rect(x0, y, w, 8)
+    pdf.set_xy(x0 + 1.5, y + 1.5)
+    label("TRANSPORTER", w=21)
+    value(n.transporter, w=33)
+    label("SEEL NR", w=12)
     # A long seal number shrinks to fit rather than run into Verkoel op.
     pdf.set_font("Helvetica", "", 10)
-    text(max(6, min(10, 10 * 33 / max(pdf.get_string_width(_latin(n.seal_no)), 1))), n.seal_no, h=5, w=34)
-    text(7, "VERKOEL OP", h=5, w=17)
-    text(10, f"{n.cooled_to} °C" if n.cooled_to else "°C", h=5, align="R", w=w - (pdf.get_x() - pdf.l_margin) - 1)
+    text(max(6, min(10, 10 * 31 / max(pdf.get_string_width(_latin(n.seal_no)), 1))), n.seal_no, h=5, w=32)
+    label("VERKOEL OP", w=16)
+    value(f"{n.cooled_to} °C" if n.cooled_to else "°C", align="R", w=w - (pdf.get_x() - x0) - 1.5)
     y += 8
 
-    # Getal | Beskrywing van inhoud: at least as many rows as the paper has.
-    pdf.set_xy(pdf.l_margin, y)
-    text(7, "GETAL", border=1, w=18, h=5)
-    text(7, "BESKRYWING VAN INHOUD", border=1, w=w - 18, h=5, align="C", new_x="LMARGIN", new_y="NEXT")
-    rows = note_lines(n)
-    for i in range(max(len(rows), 12)):
-        ln = rows[i] if i < len(rows) else {}
-        style = "B" if ln.get("bold") else ""
-        text(9, ln.get("count", ""), style, border=1, w=18, h=6, align="C")
-        text(9, ln.get("description", ""), style, border=1, w=w - 18, h=6, new_x="LMARGIN", new_y="NEXT")
+    # Pallet no | Beskrywing van inhoud: each pallet a block of its own, shown
+    # as Pallet Stack shows it, then the total. A block that would not fit
+    # (with the small print and dates after the last one) starts a new page.
+    col = 18
+    footer = 18
 
-    pdf.ln(1)
+    def head():
+        if pdf.page_no() > 1:  # a later page says whose it is
+            text(9, f"AFLEWERINGSNOTA {n.note_no}  ·  page {pdf.page_no()} of {{nb}}", "B", h=7, new_x="LMARGIN", new_y="NEXT")
+        pdf.set_xy(x0, pdf.get_y())
+        label("PALLET NO", border=1, w=col, align="C")
+        label("BESKRYWING VAN INHOUD", border=1, w=w - col, align="C", new_x="LMARGIN", new_y="NEXT")
+
+    pdf.set_y(y)
+    head()
+    pallets = json.loads(n.pallets or "[]")
+    bottom = pdf.h - pdf.b_margin
+    for i, p in enumerate(pallets):
+        height = 2 + 5 + 4.5 + 4.5 * len(p["lines"]) + 1.5
+        last = i == len(pallets) - 1
+        if pdf.get_y() + height + (8 + footer if last else 0) > bottom:
+            pdf.add_page()
+            head()
+        y = pdf.get_y()
+        pdf.rect(x0, y, col, height)
+        pdf.rect(x0 + col, y, w - col, height)
+        pdf.set_xy(x0, y + 1.5)
+        text(12, p["pallet_ref"], "B", h=6, w=col, align="C")
+        right = x0 + col + 1.5
+        inner = w - col - 3
+        pdf.set_xy(right, y + 1.5)
+        value(" · ".join(v or "-" for v in (p["date_code"], p["supplier_name"], p["market_name"])), w=inner * 0.6)
+        text(9, f"{_cartons(p)} cartons · {_kg(_pallet_kg(p))} kg", h=5, w=inner * 0.4, align="R")
+        pdf.set_xy(right, y + 6.5)
+        pdf.set_text_color(90, 90, 90)
+        text(8, f"Barcode {p['barcode']}", h=4.5, w=inner)
+        pdf.set_text_color(0, 0, 0)
+        for j, ln in enumerate(p["lines"]):
+            pdf.set_xy(right + 2, y + 11 + j * 4.5)
+            text(9, f"{j + 1}.  {_line_text(ln)}", h=4.5, w=inner - 2)
+        pdf.set_xy(x0, y + height)
+    total = f"{len(pallets)} pallet{'' if len(pallets) == 1 else 's'} · {sum(map(_cartons, pallets))} cartons · {_kg(sum(map(_pallet_kg, pallets)))} kg"
+    label("TOTAL", border=1, w=col, h=8, align="C")
+    value(total, "B", border=1, w=w - col, h=8, new_x="LMARGIN", new_y="NEXT")
+
+    pdf.ln(1.5)
     pdf.set_font("Helvetica", "", 6)
     pdf.multi_cell(w, 3, _latin(SMALL_PRINT), align="C")
     pdf.ln(2)
-    text(7, "OPLAAIDATUM", w=20, h=6)
-    text(11, _day(n.loaded_on), w=half - 20, h=6)
-    text(7, "AFLAAIDATUM", w=20, h=6)
-    text(11, _day(n.offloaded_on), h=6)
+    label("OPLAAIDATUM", w=20, h=6)
+    value(_day(n.loaded_on), w=half - 20, h=6)
+    label("AFLAAIDATUM", w=20, h=6)
+    value(_day(n.offloaded_on), h=6)
     name = f"afleweringsnota_{n.note_no}.pdf"
     return Response(bytes(pdf.output()), media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
