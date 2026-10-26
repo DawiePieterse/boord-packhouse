@@ -14,4 +14,6 @@ def test_updater_import_check_matches_requirements():
                     for line in fh if line.strip() and not line.startswith("#")}
     with open(os.path.join(ROOT, "update_packhouse_server.bat"), encoding="utf-8") as fh:
         checked = re.search(r'-c "import ([a-z_, ]+)"', fh.read()).group(1)
-    assert {m.strip() for m in checked.split(",")} == required
+    # The module is not always the package's name (fpdf2 imports as fpdf).
+    modules = {"fpdf2": "fpdf"}
+    assert {m.strip() for m in checked.split(",")} == {modules.get(r, r) for r in required}

@@ -226,7 +226,7 @@ echo ==^> Installing any new dependencies...
 :: The list is exactly backend\requirements.txt (tests/test_updater.py fails
 :: if they drift). It once named two of Boord Owner's libraries this app never
 :: installs, so every update stopped here on a perfectly healthy server.
-"%VENV_PY%" -c "import fastapi, uvicorn, sqlmodel, alembic" >nul 2>&1
+"%VENV_PY%" -c "import fastapi, uvicorn, sqlmodel, alembic, fpdf, openpyxl" >nul 2>&1
 if errorlevel 1 (
     echo.
     echo The server's dependencies are not fully installed, so this update

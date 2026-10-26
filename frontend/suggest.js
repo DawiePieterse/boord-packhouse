@@ -82,4 +82,33 @@ function estimateResidue(minutes, result, settings) {
   return { ppm: Math.round(ppm * 10) / 10, level };
 }
 
-if (typeof module !== "undefined") module.exports = { suggestMinutes, describeSuggestion, estimateResidue };
+// The batch number a run gets when it starts, made on the tablet so it works
+// with no Wi-Fi: T2-4104-1057-B15/8a-K7 = tent 2, date code 4104, 10:57 (the
+// tablet's own clock, farm time), fruit from blocks 15 and 8a, and two
+// characters of the run's uuid so two tablets starting in the same minute
+// still differ. The date code is the ISO week's last digit, the weekday
+// (Monday 1 ... Sunday 7), 0, then the week's first digit: Monday of week 44 is
+// 4104, of week 45 5104, of week 52 2105, of week 5 5100.
+// Sources are the picked fruit sources: blocks are B<id>, bought-in suppliers
+// S<id>; a letter is not repeated when it follows the same letter (B15/8a,
+// but B15/S2).
+function dateCode(when) {
+  const day = (when.getDay() + 6) % 7 + 1;                                  // Monday 1 ... Sunday 7
+  const thursday = new Date(when.getFullYear(), when.getMonth(), when.getDate() + 4 - day);
+  const week = Math.ceil(((thursday - new Date(thursday.getFullYear(), 0, 1)) / 86400000 + 1) / 7);
+  return `${week % 10}${day}0${Math.floor(week / 10)}`;
+}
+
+function batchNo(tentId, when, sources, uuid) {
+  const p = (n) => String(n).padStart(2, "0");
+  let last = "";
+  const fruit = sources.map((s) => {
+    const letter = s.supplier_id != null ? "S" : "B";
+    const code = `${letter === last ? "" : letter}${s.supplier_id != null ? s.supplier_id : s.block_id}`;
+    last = letter;
+    return code;
+  }).join("/");
+  return `T${tentId}-${dateCode(when)}-${p(when.getHours())}${p(when.getMinutes())}-${fruit}-${uuid.replace(/-/g, "").slice(0, 2).toUpperCase()}`;
+}
+
+if (typeof module !== "undefined") module.exports = { suggestMinutes, describeSuggestion, estimateResidue, batchNo, dateCode };

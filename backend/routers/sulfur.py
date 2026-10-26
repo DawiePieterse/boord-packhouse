@@ -10,6 +10,7 @@ Every response carries server_now, so each tablet can correct its own clock
 (frontend/sync.js) - start times are tablet times, and a tablet that is five
 minutes out would otherwise skew every timer on every other tablet.
 """
+import json
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
@@ -91,6 +92,9 @@ class RunIn(SQLModel):
     suggestion_temp: Optional[float] = None
     suggestion_humidity: Optional[float] = None
     estimated_ppm: Optional[float] = None
+    batch_no: str = ""
+    size: str = ""
+    more_sources: str = ""  # JSON list, see models.SulfurRun
 
 
 class SyncIn(SQLModel):
@@ -107,6 +111,14 @@ def _problem(run: RunIn, session: Session) -> Optional[str]:
         return "grams, minutes and crates must be positive"
     if (run.block_id is None) == (run.supplier_id is None):
         return "a run needs exactly one of a block or a supplier"
+    try:
+        more = json.loads(run.more_sources or "[]")
+        ok = isinstance(more, list) and len(more) <= 3 and all(
+            isinstance(m, dict) and (m.get("block_id") is None) != (m.get("supplier_id") is None) for m in more)
+    except ValueError:
+        ok = False
+    if not ok:
+        return "more_sources must be a short list of blocks or suppliers"
     return None
 
 

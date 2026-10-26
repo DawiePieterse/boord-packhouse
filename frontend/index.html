@@ -124,6 +124,9 @@ if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
       <div class="text-lg font-bold px-1 pt-4">Suggested time and aril SO₂</div>
       <div class="text-sm text-slate-500 px-1">The numbers behind the suggested time on each tent card. There is no published formula for litchi sulfur time, so these are a starting rule to tune: the operator always sees the reasons and can change the time. Set both percentages to 0 and every variety to 1.0 to suggest each tent's own default time.</div>
       <form id="sulfurSettingsForm" class="space-y-3"></form>
+      <div class="text-lg font-bold px-1 pt-4">Daily report</div>
+      <div class="text-sm text-slate-500 px-1">Every run with its batch number, and the sulfur used per tent and per day, as the paper sulfur room log and usage sheet. Download it as Excel or PDF.</div>
+      <div id="sulfurReport" class="bg-white rounded-2xl shadow p-4 space-y-3"></div>
     </div>
 
     <!-- Everything for the Acid bath role: its baths and when their chemicals are due. -->

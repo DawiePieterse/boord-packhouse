@@ -5,7 +5,7 @@ No tent delete: a retired tent (active = false) leaves the sulfur screen but
 past runs keep pointing at it.
 """
 import json
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, SQLModel, select
@@ -84,6 +84,7 @@ class SulfurSettingsIn(SQLModel):
     residue_calibrated: bool = False
     residue_limit_ppm: float = 10.0
     residue_warn_ppm: float = 8.0
+    sizes: Optional[List[str]] = None  # None: leave the list as it is
 
 
 @router.get("/sulfur")
@@ -103,9 +104,16 @@ def save_sulfur_settings(body: SulfurSettingsIn, session: Session = Depends(get_
         raise HTTPException(422, "The residue anchor must be above 0, and the warning at or below the limit")
     if any(not (0 < f <= 5) for f in body.variety_factors.values()):
         raise HTTPException(422, "A variety factor must be above 0 (1.0 means no change)")
+    sizes = None
+    if body.sizes is not None:
+        sizes = list(dict.fromkeys(z.strip() for z in body.sizes if z.strip()))
+        if not sizes:
+            raise HTTPException(422, "Keep at least one fruit size")
     row = session.get(SulfurSettings, 1)
-    for key, value in body.model_dump(exclude={"variety_factors"}).items():
+    for key, value in body.model_dump(exclude={"variety_factors", "sizes"}).items():
         setattr(row, key, value)
+    if sizes is not None:
+        row.sizes = json.dumps(sizes)
     row.variety_factors = json.dumps({k.strip(): v for k, v in body.variety_factors.items() if k.strip()})
     session.add(row)
     session.commit()

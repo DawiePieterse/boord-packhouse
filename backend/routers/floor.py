@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 
 import boord
 from db import get_packhouse_session
-from models import Bath, Tent
+from models import Bath, SulfurRun, Tent
 
 router = APIRouter(prefix="/api", tags=["floor"])
 
@@ -23,7 +23,14 @@ def list_fruit_sources():
 
 @router.get("/tents")
 def list_tents(session: Session = Depends(get_packhouse_session)):
-    return session.exec(select(Tent).where(Tent.active == True).order_by(Tent.sort, Tent.id)).all()  # noqa: E712
+    """The active tents. last_grams is what the tent's latest run used: the
+    operator's own change to the dose is the next batch's starting number."""
+    out = []
+    for t in session.exec(select(Tent).where(Tent.active == True).order_by(Tent.sort, Tent.id)).all():  # noqa: E712
+        last = session.exec(select(SulfurRun.grams).where(SulfurRun.tent_id == t.id)
+                            .order_by(SulfurRun.started_at.desc())).first()
+        out.append({**t.model_dump(), "last_grams": last})
+    return out
 
 
 @router.get("/baths")
