@@ -45,6 +45,30 @@ function palletsView() {
   const pallets = newestFirst().filter((p) => sameDay(p.scanned_at) || p.error);
   const rows = pallets.map((p) => `
     <button type="button" data-pallet="${esc(p.uuid)}" class="w-full text-left border-t py-2 active:bg-slate-50">
+      ${palletSummary(p)}
+      ${p.error ? `<div class="text-sm text-red-600 mt-1">Not saved: ${esc(p.error)}. Tap to fix it.</div>` : ""}
+    </button>`).join("");
+  return `
+    <div class="bg-white rounded-2xl shadow p-4">
+      <button type="button" data-add class="w-full boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-barcode"></i> Add a new pallet</button>
+    </div>
+    <div class="bg-white rounded-2xl shadow px-4 pb-1">
+      <div class="${LIST_HEAD}">
+        <div class="text-lg font-bold">Pallets added today</div>
+        <div class="text-base"><b>${pallets.length}</b> pallet${pallets.length === 1 ? "" : "s"} · <b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b></div>
+        <div class="text-xs text-white/80">Tap a pallet to edit or delete it.</div>
+      </div>
+      ${rows || `<div class="text-center text-slate-400 text-sm py-6 border-t">No pallets yet today</div>`}
+    </div>`;
+}
+
+// The head of a list card (Pallets added today; a delivery note's pallets): a
+// dark blue band across the card's top, so the totals stand out from the rows.
+const LIST_HEAD = "-mx-4 px-4 py-3 mb-1 rounded-t-2xl bg-[var(--boord-blue)] text-white";
+
+// One pallet as the list shows it: number, cartons and kg, date code, supplier,
+// market, barcode and its lines. The delivery note shows pallets the same way.
+const palletSummary = (p) => `
       <div class="flex justify-between gap-3 items-baseline">
         <div class="font-bold text-lg">Pallet ${esc(p.pallet_ref || "---")}</div>
         <div class="text-sm shrink-0"><b>${palletCartons(p)}</b> cartons · ${kgText(palletKg(p))}</div>
@@ -53,20 +77,7 @@ function palletsView() {
       <div class="text-xs text-slate-500 truncate">Barcode ${esc(p.barcode)}${p.scanned_by_name ? ` · ${esc(p.scanned_by_name)}` : ""}</div>
       <ol class="list-decimal pl-6 mt-1 text-sm">
         ${p.lines.map((l) => `<li><b>${l.cartons}</b> x ${esc(l.packaging_name)}${l.block_id ? `, ${esc(l.block_name)}${l.variety ? `, ${esc(l.variety)}` : ""}` : ""}, Litchis</li>`).join("")}
-      </ol>
-      ${p.error ? `<div class="text-sm text-red-600 mt-1">Not saved: ${esc(p.error)}. Tap to fix it.</div>` : ""}
-    </button>`).join("");
-  return `
-    <div class="bg-white rounded-2xl shadow p-4">
-      <button type="button" data-add class="w-full boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-barcode"></i> Add a new pallet</button>
-    </div>
-    <div class="bg-white rounded-2xl shadow px-4 pb-1">
-      <div class="font-semibold pt-3">Pallets added today</div>
-      <div class="text-sm"><b>${pallets.length}</b> pallet${pallets.length === 1 ? "" : "s"} · <b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b></div>
-      <div class="text-xs text-slate-500 pb-2">Tap a pallet to edit or delete it.</div>
-      ${rows || `<div class="text-center text-slate-400 text-sm py-6 border-t">No pallets yet today</div>`}
-    </div>`;
-}
+      </ol>`;
 
 // ---- A pallet: scan its label, then what is on it ---------------------------
 

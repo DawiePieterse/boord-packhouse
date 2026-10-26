@@ -1,7 +1,7 @@
 // App-shell cache so the tablets still open the app with no signal. Runs
 // themselves are queued in IndexedDB (idb.js), never here.
 const CACHE_PREFIX = "boord-packhouse-";
-const CACHE = "boord-packhouse-v36";
+const CACHE = "boord-packhouse-v37";
 const SHELL = [
   "./",
   "./index.html",
@@ -12,6 +12,7 @@ const SHELL = [
   "./sulfur.js",
   "./acid.js",
   "./consignment.js",
+  "./deliverynote.js",
   "./manifest.json",
   "./shared/styles.css",
   "./shared/api.js",

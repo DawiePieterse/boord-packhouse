@@ -35,6 +35,7 @@ if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
 <script src="sulfur.js"></script>
 <script src="acid.js"></script>
 <script src="consignment.js"></script>
+<script src="deliverynote.js"></script>
 </head>
 <body class="bg-slate-100 min-h-screen pb-20">
 
@@ -99,6 +100,12 @@ if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
     <div id="consignmentBody" class="space-y-3"></div>
   </section>
 
+  <!-- Delivery Note: the recent notes, or one note (deliverynote.js). -->
+  <section id="deliverynote" class="hidden max-w-xl mx-auto space-y-3">
+    <div id="deliveryOperatorBar" class="bg-white rounded-2xl shadow p-3 flex items-center gap-3"></div>
+    <div id="deliveryBody" class="space-y-3"></div>
+  </section>
+
   <!-- Settings PIN: four digits on a keypad big enough for gloves. -->
   <section id="pin" class="hidden">
     <div class="bg-white rounded-2xl shadow p-6 max-w-sm mx-auto text-center">
@@ -144,6 +151,25 @@ if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
       <div class="text-lg font-bold px-1 pt-4">Markets</div>
       <div class="text-sm text-slate-500 px-1">Where a pallet is going. The market decides what kind of pallet is needed and how it must be marked. Untick In use to take one off the list; Delete only works for one no pallet uses.</div>
       <div id="marketSettings" class="space-y-3"></div>
+    </div>
+
+    <!-- Everything for the Delivery Note role: who carries the load, who it is for, and the cooled-to a note starts with. -->
+    <div id="deliverySettings" data-settings-page="deliverynote" class="space-y-3">
+      <div class="text-lg font-bold px-1 pt-1">Transporters</div>
+      <div class="text-sm text-slate-500 px-1">Who carries the load. A note keeps the name it was saved with. Untick In use to take one off the list; Delete only works for one no delivery note uses.</div>
+      <div id="transporterSettings" class="space-y-3"></div>
+      <div class="text-lg font-bold px-1 pt-4">Receivers</div>
+      <div class="text-sm text-slate-500 px-1">Who the load is for: its name, market and city, printed on the note one under the other.</div>
+      <div id="receiverSettings" class="space-y-3"></div>
+      <div class="text-lg font-bold px-1 pt-4">New notes</div>
+      <div class="text-sm text-slate-500 px-1">A new note is offered the last note number + 1, and starts with this cooled-to temperature. The last number moves on by itself as notes are saved; change it to carry on from the paper book or to undo a mistyped number.</div>
+      <form id="dnSettingsForm" class="bg-white rounded-2xl shadow p-4 flex items-end gap-2">
+        <label class="flex-1 min-w-0"><span class="text-xs font-semibold text-slate-600">Last note number</span>
+          <input id="dnLastNo" type="number" min="1" step="1" inputmode="numeric" class="w-full border border-slate-300 rounded-lg px-2 py-2.5"></label>
+        <label class="flex-1 min-w-0"><span class="text-xs font-semibold text-slate-600">Cooled to (°C)</span>
+          <input id="dnCooledTo" type="number" step="any" inputmode="decimal" class="w-full border border-slate-300 rounded-lg px-2 py-2.5"></label>
+        <button class="px-4 h-11 boord-btn-primary rounded-lg font-semibold">Save</button>
+      </form>
     </div>
 
     <!-- Setup: looking after the app itself - backups and the settings PIN. -->
