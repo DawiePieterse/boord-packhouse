@@ -248,6 +248,7 @@ class Pallet(SQLModel, table=True):
     barcode: str
     scanned_at: datetime
     lines: str = "[]"
+    pallet_ref: str = ""        # the 3-digit pallet number written on the sheet, unique within its consignment
     removed: bool = False
     pallet_year: Optional[int] = None
     pallet_no: Optional[int] = None

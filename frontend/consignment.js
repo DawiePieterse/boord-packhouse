@@ -44,18 +44,18 @@ function listView() {
   }).join("");
   return `
     <form data-new class="bg-white rounded-2xl shadow p-4 space-y-3">
-      <div class="font-semibold">New consignment</div>
+      <div class="font-semibold">New pallet stack</div>
       <select name="supplier" class="w-full border border-slate-300 rounded-lg p-3 text-lg">
         ${Store.suppliers().map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}
       </select>
       <select name="market" class="w-full border border-slate-300 rounded-lg p-3 text-lg">
         ${markets.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join("")}
       </select>
-      <button class="w-full boord-btn-primary rounded-xl py-4 text-lg font-bold"${markets.length && Store.suppliers().length ? "" : " disabled"}>Start consignment</button>
-      ${markets.length ? "" : `<div class="text-sm text-slate-500">No markets yet - add them in Settings -> Consignment.</div>`}
+      <button class="w-full boord-btn-primary rounded-xl py-4 text-lg font-bold"${markets.length && Store.suppliers().length ? "" : " disabled"}>Start pallet stack</button>
+      ${markets.length ? "" : `<div class="text-sm text-slate-500">No markets yet - add them in Settings -> Pallet Stack.</div>`}
       ${Store.suppliers().length ? "" : `<div class="text-sm text-slate-500">No suppliers yet - the list comes from Boord, so connect once to load it.</div>`}
     </form>
-    ${rows || `<div class="text-center text-slate-400 text-sm py-6">No consignments yet</div>`}`;
+    ${rows || `<div class="text-center text-slate-400 text-sm py-6">No pallet stacks yet</div>`}`;
 }
 
 function detailView(c) {
@@ -68,7 +68,7 @@ function detailView(c) {
     : suppliers.some((s) => s.id === c.supplier_id) ? suppliers : [{ id: c.supplier_id, name: c.supplier_name }, ...suppliers];
   const rows = pallets.map((p) => `
     <button type="button" data-pallet="${esc(p.uuid)}" class="w-full text-left border-t py-3 flex gap-3 items-start active:bg-slate-50">
-      <div class="font-bold text-lg w-14 shrink-0">${pad(p.pallet_no)}</div>
+      <div class="w-14 shrink-0"><div class="font-bold text-lg">${esc(p.pallet_ref || "---")}</div><div class="text-xs text-slate-400">${pad(p.pallet_no)}</div></div>
       <div class="flex-1 min-w-0">
         ${p.lines.map((l) => `<div class="text-sm">${esc(l.packaging_name)} <b>${l.cartons}</b></div>`).join("")}
         <div class="text-xs text-slate-400 truncate">${esc(p.barcode)}</div>
@@ -99,8 +99,8 @@ function detailView(c) {
 function openPallet(pallet) {
   cn.view = "pallet";
   cn.draft = pallet
-    ? { uuid: pallet.uuid, pallet, barcode: pallet.barcode, lines: pallet.lines.map((l) => ({ packaging_id: l.packaging_id, cartons: l.cartons })) }
-    : { uuid: Boord.uuid(), pallet: null, barcode: "", lines: [{ packaging_id: null, cartons: "" }] };
+    ? { uuid: pallet.uuid, pallet, barcode: pallet.barcode, ref: pallet.pallet_ref || "", lines: pallet.lines.map((l) => ({ packaging_id: l.packaging_id, cartons: l.cartons })) }
+    : { uuid: Boord.uuid(), pallet: null, barcode: "", ref: "", lines: [{ packaging_id: null, cartons: "" }] };
   renderConsignment();
   if (!pallet) startPalletScan();
 }
@@ -141,10 +141,12 @@ function palletForm() {
   return `
     <div class="flex items-center gap-3">
       <button type="button" data-cancel class="px-3 py-2 rounded-lg border border-slate-300 bg-white"><i class="fa-solid fa-arrow-left"></i></button>
-      <div class="font-semibold">${d.pallet ? `Pallet ${pad(d.pallet.pallet_no)}` : "New pallet"}</div>
+      <div class="font-semibold">${d.pallet ? `Pallet ${esc(d.pallet.pallet_ref || pad(d.pallet.pallet_no))}` : "New pallet"}</div>
     </div>
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
       <div id="palletReader" class="hidden w-full rounded-lg overflow-hidden bg-black min-h-[200px]"></div>
+      <label class="block"><span class="text-sm font-semibold text-slate-600">Pallet number</span>
+        <input data-field="ref" value="${esc(d.ref)}" inputmode="numeric" maxlength="3" pattern="[0-9]{3}" placeholder="001" class="w-full border border-slate-300 rounded-lg p-3 text-lg"></label>
       <div class="flex gap-2">
         <input data-field="barcode" value="${esc(d.barcode)}" inputmode="numeric" placeholder="Scan the pallet label" class="flex-1 min-w-0 border border-slate-300 rounded-lg p-3 text-lg">
         <button type="button" data-scan class="px-4 rounded-lg border border-slate-300"><i class="fa-solid fa-barcode text-xl"></i></button>
@@ -216,7 +218,10 @@ async function savePallet() {
   const lines = draftLines(d);
   const barcode = d.barcode.trim();
   const fail = (m) => { $("palletScanMsg").textContent = m; };
+  if (!/^\d{3}$/.test(d.ref)) return fail("The pallet number is 3 digits, like 001.");
   if (!barcode) return fail("Scan the pallet label first.");
+  const twin = palletsOf({ uuid: d.pallet ? d.pallet.consignment_uuid : cn.consignment }).find((p) => p.pallet_ref === d.ref && p.uuid !== d.uuid);
+  if (twin) return fail(`Pallet ${d.ref} is already on this stack.`);
   if (!lines.length) return fail("Pick a pack and the number of cartons.");
   // A line with only one of the two is a slip, not a blank line to skip.
   if (d.lines.some((l) => (l.packaging_id != null) !== (Number(l.cartons) >= 1))) return fail("Every line needs a pack and a number of cartons.");
@@ -224,14 +229,14 @@ async function savePallet() {
   if (other) return fail(`That label is already on pallet ${pad(other.pallet_no)}.`);
   stopPalletScan();
   await Store.saveRun({ ...(d.pallet || { kind: "pallet", consignment_uuid: cn.consignment, scanned_at: nowIso() }),
-                        kind: "pallet", uuid: d.uuid, barcode, lines, removed: false, rev: Date.now() });
+                        kind: "pallet", uuid: d.uuid, barcode, lines, pallet_ref: d.ref, removed: false, rev: Date.now() });
   cn.view = "detail";
   renderConsignment();
 }
 
 async function removePallet() {
   const d = cn.draft;
-  if (!confirm(`Take pallet ${pad(d.pallet.pallet_no)} off this consignment?`)) return;
+  if (!confirm(`Take this pallet off the stack?`)) return;
   await Store.saveRun({ ...d.pallet, kind: "pallet", removed: true, rev: Date.now() });
   cn.view = "detail";
   renderConsignment();
@@ -274,6 +279,7 @@ function onConsignmentClick(ev) {
 function onConsignmentInput(ev) {
   const f = ev.target.dataset.field;
   if (f === "barcode") { cn.draft.barcode = ev.target.value; return; }
+  if (f === "ref") { cn.draft.ref = ev.target.value.replace(/\D/g, "").slice(0, 3); ev.target.value = cn.draft.ref; return; }
   if (f) {
     const line = cn.draft.lines[Number(ev.target.closest("[data-line]").dataset.line)];
     if (f === "pack") line.packaging_id = ev.target.value ? Number(ev.target.value) : null;

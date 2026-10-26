@@ -17,7 +17,7 @@ const PALLET_BOXES = `<svg viewBox="0 0 64 64" class="w-[1.15em] h-[1em] inline-
 const MODULES = [
   { id: "sulfur",   name: "Sulfur tent",         icon: "fa-tent",                     blurb: "Load a run, dose, countdown and overrun alarm.", built: true },
   { id: "acid",     name: "Acid bath",           icon: "fa-flask",                    blurb: "Batches, dip and drying timers, chemical changes.", built: true },
-  { id: "consignment", name: "Consignment",   icon: "",                  iconHtml: PALLET_BOXES, blurb: "Pallets and cartons grouped into a consignment.", built: true },
+  { id: "consignment", name: "Pallet Stack",   icon: "",                  iconHtml: PALLET_BOXES, blurb: "Pallets and cartons grouped into a pallet stack.", built: true },
   { id: "deliverynote", name: "Delivery Note",   icon: "fa-file-lines",               blurb: "Delivery note for a load leaving the farm." },
 ];
 
@@ -158,7 +158,7 @@ const SETTINGS_PAGES = [
   { id: "packhouse", name: "Packhouse", icon: "fa-sliders" },
   { id: "sulfur",    name: "Sulfur",    icon: "fa-tent",       load: () => { loadTentSettings(); loadSulfurSettings(); loadSulfurReport(); } },
   { id: "acid",      name: "Acid",      icon: "fa-flask",      load: loadBathSettings },
-  { id: "consignment", name: "Consignment", icon: "fa-pallet",   load: loadConsignmentSettings },
+  { id: "consignment", name: "Pallet Stack", icon: "fa-pallet",   load: loadConsignmentSettings },
   { id: "setup",     name: "Setup",     icon: "fa-screwdriver-wrench", load: loadBackupsList },
 ];
 

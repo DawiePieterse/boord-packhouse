@@ -41,6 +41,7 @@ class PalletIn(SQLModel):
     consignment_uuid: str
     barcode: str
     scanned_at: datetime
+    pallet_ref: str = ""
     lines: list = []
     removed: bool = False
 
@@ -71,6 +72,13 @@ def _pallet_problem(rec: PalletIn, session: Session) -> Optional[str]:
     if not barcode:
         return "a pallet needs its scanned barcode"
     if not rec.removed:
+        if not (len(rec.pallet_ref) == 3 and rec.pallet_ref.isascii() and rec.pallet_ref.isdigit()):
+            return "the pallet number is 3 digits"
+        twin = session.exec(select(Pallet).where(Pallet.consignment_uuid == rec.consignment_uuid,
+                                                 Pallet.pallet_ref == rec.pallet_ref, Pallet.uuid != rec.uuid,
+                                                 Pallet.removed == False)).first()  # noqa: E712
+        if twin is not None:
+            return f"pallet {rec.pallet_ref} is already on this stack"
         problem = _lines_problem(rec.lines)
         if problem:
             return problem
@@ -122,7 +130,7 @@ def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
                          synced_at=now, barcode="", pallet_year=year, pallet_no=_next_number(session, year))
         row.barcode, row.removed = rec.barcode.strip(), rec.removed
         if not rec.removed:
-            row.lines = json.dumps(rec.lines)
+            row.lines, row.pallet_ref = json.dumps(rec.lines), rec.pallet_ref
         session.add(row)
         session.flush()  # the next new pallet counts this one
         synced.append(rec.uuid)

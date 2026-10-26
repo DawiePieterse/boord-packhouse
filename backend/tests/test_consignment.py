@@ -20,7 +20,7 @@ def cons(uuid="c1", **kw):
 
 def pallet(uuid="p1", barcode="(00)060099005963004759", lines=None, **kw):
     return {"uuid": uuid, "consignment_uuid": "c1", "barcode": barcode, "scanned_at": _iso(NOW),
-            "lines": [LINE] if lines is None else lines, **kw}
+            "pallet_ref": "00" + uuid[-1], "lines": [LINE] if lines is None else lines, **kw}
 
 
 def sync(client, consignments=(), pallets=()):
@@ -65,6 +65,7 @@ def test_barcode_is_unique_until_the_pallet_is_removed(client):
 
 @pytest.mark.parametrize("bad", [
     {"consignment_uuid": "nope"}, {"barcode": "  "}, {"lines": []},
+    {"pallet_ref": ""}, {"pallet_ref": "12"}, {"pallet_ref": "1234"}, {"pallet_ref": "12a"},
     {"lines": [{**LINE, "cartons": 0}]}, {"lines": [{**LINE, "carton_kg": 0}]}, {"lines": [{**LINE, "packaging_name": ""}]},
 ])
 def test_bad_pallets_are_rejected_not_stored(client, bad):
@@ -83,6 +84,16 @@ def test_supplier_is_kept_and_can_change(client):
     sync(client, [cons(supplier_id=2, supplier_name="Jansen Boerdery")])
     c = state(client)["consignments"][0]
     assert (c["supplier_id"], c["supplier_name"]) == (2, "Jansen Boerdery")
+
+
+def test_pallet_number_is_unique_within_its_stack_only(client):
+    sync(client, [cons(), cons("c2")], [pallet("p1")])
+    out = sync(client, pallets=[pallet("p2", barcode="B2", pallet_ref="001")])
+    assert "already on this stack" in out["rejected"][0]["error"]
+    # the same number on another stack, or on a pallet taken off, is fine
+    assert sync(client, pallets=[{**pallet("p3", barcode="B3", pallet_ref="001"), "consignment_uuid": "c2"}])["synced"] == ["p3"]
+    sync(client, pallets=[pallet("p1", removed=True)])
+    assert sync(client, pallets=[pallet("p2", barcode="B2", pallet_ref="001")])["synced"] == ["p2"]
 
 
 def test_unknown_market_is_rejected(client):
