@@ -171,9 +171,12 @@ def options(session: Session = Depends(get_packhouse_session)):
 FARM = "Bekfontein Boerdery"
 CONTACT = ["Tel: 083 627 6926", "Office: 083 762 1395", "Email: andre@laughw.co.za"]
 SENDER = ["BEKFONTEIN BOERDERY", "POSBUS 1290", "MALELANE", "1320"]
+# Printed in Afrikaans, as the paper note is, with the English beside it.
 SMALL_PRINT = ("Bekfontein Boerdery is nie verantwoordelik vir enige tekorte of beskadiging van goedere voor of na "
                "aflewering nie. Indien enige eise: Doen dit asseblief stiptelik binne sewe dae na aflewering d.m.v. "
-               "'n epos na ons kantore.")
+               "'n epos na ons kantore.\n"
+               "Bekfontein Boerdery is not responsible for any shortage of or damage to goods before or after "
+               "delivery. Any claim: please make it promptly, within seven days of delivery, by e-mail to our offices.")
 
 
 def _kg(v: float) -> str:
@@ -234,10 +237,13 @@ def _draw(n: DeliveryNote, pages: int):
     pdf.set_y(top + 15)
 
     def title_no():
-        text(11, "AFLEWERINGSNOTA", "B", h=7, w=46)
+        title = "AFLEWERINGSNOTA / DELIVERY NOTE"
+        pdf.set_font("Helvetica", "B", 11)
+        room = pdf.get_string_width(title) + 6
+        text(11, title, "B", h=7, w=room)
         pdf.set_text_color(200, 0, 0)
         text(14, str(n.note_no), "B", h=7, w=30)
-        text(14, f"page {pdf.page_no()} of {pages}", "B", h=7, w=w - 76, align="R")
+        text(14, f"page {pdf.page_no()} of {pages}", "B", h=7, w=w - room - 30, align="R")
         pdf.set_text_color(0, 0, 0)
         pdf.ln()
 
@@ -246,7 +252,7 @@ def _draw(n: DeliveryNote, pages: int):
     # Afsender | Ontvanger, the same way (capitals, as the printed sender), then
     # three equal signature boxes.
     x0, y = pdf.l_margin, pdf.get_y()
-    addresses = ((x0, "AFSENDER", SENDER), (x0 + half, "ONTVANGER", n.receiver.strip().upper().split("\n")[:5]))
+    addresses = ((x0, "AFSENDER / SENDER", SENDER), (x0 + half, "ONTVANGER / RECEIVER", n.receiver.strip().upper().split("\n")[:5]))
     tall = 6 + 5 * max(len(lines) for _, _, lines in addresses) + 1.5  # as tall as the longer address, no more
     pdf.rect(x0, y, w, tall)
     pdf.line(x0 + half, y, x0 + half, y + tall)
@@ -265,9 +271,13 @@ def _draw(n: DeliveryNote, pages: int):
         for k in (1, 2):
             pdf.line(x0 + k * third, y, x0 + k * third, y + height)
         if height == 13:
-            for k, title in enumerate(("HANDTEKENING AFSENDER", "HANDTEKENING ONTVANGER", "HANDTEKENING DRYWER")):
-                pdf.set_xy(x0 + k * third + 1.5, y + 1)
-                text(6, title, h=3)
+            # Afrikaans, and the English under it: both in one line would not fit a third.
+            for k, (afr, eng) in enumerate((("HANDTEKENING AFSENDER", "SENDER'S SIGNATURE"),
+                                            ("HANDTEKENING ONTVANGER", "RECEIVER'S SIGNATURE"),
+                                            ("HANDTEKENING DRYWER", "DRIVER'S SIGNATURE"))):
+                for row, title in enumerate((afr, eng)):
+                    pdf.set_xy(x0 + k * third + 1.5, y + 1 + row * 3)
+                    text(6, title, h=3)
         y += height
     y -= 8
 
@@ -276,8 +286,8 @@ def _draw(n: DeliveryNote, pages: int):
         pdf.set_font("Helvetica", "", 10)
         text(max(6, min(10, 10 * room / max(pdf.get_string_width(_latin(v)), 1))), v, h=5, w=room)
 
-    for k, (title, v) in enumerate((("TRANSPORTER", n.transporter), ("SEEL NR", n.seal_no),
-                                    ("VERKOEL OP", f"{n.cooled_to} °C" if n.cooled_to else "°C"))):
+    for k, (title, v) in enumerate((("TRANSPORTER", n.transporter), ("SEEL NR / SEAL NO", n.seal_no),
+                                    ("VERKOEL OP / COOLED TO", f"{n.cooled_to} °C" if n.cooled_to else "°C"))):
         pdf.set_xy(x0 + k * third + 1.5, y + 1.5)
         pdf.set_font("Helvetica", "", 7)
         room = pdf.get_string_width(title) + 3  # the label's own width, then a gap
@@ -288,15 +298,15 @@ def _draw(n: DeliveryNote, pages: int):
     # Pallet no | Beskrywing van inhoud: each pallet a block of its own, shown
     # as Pallet Stack shows it, then the total. A block that would not fit
     # (with the small print and dates after the last one) starts a new page.
-    col = 18
-    footer = 20  # the boxed small print and dates
+    col = 26  # room for TOTAAL / TOTAL
+    footer = 26  # the boxed dates and the small print in both languages
 
     def head():
         if pdf.page_no() > 1:  # a later page says whose it is, as the first page does
             title_no()
         pdf.set_xy(x0, pdf.get_y())
         text(7, "PALLET NO", "B", border=1, w=col, h=6, align="C")
-        text(7, "BESKRYWING VAN INHOUD", "B", border=1, w=w - col, h=6, align="C", new_x="LMARGIN", new_y="NEXT")
+        text(7, "BESKRYWING VAN INHOUD / DESCRIPTION OF CONTENTS", "B", border=1, w=w - col, h=6, align="C", new_x="LMARGIN", new_y="NEXT")
 
     pdf.set_y(y)
     head()
@@ -327,12 +337,12 @@ def _draw(n: DeliveryNote, pages: int):
             text(9, f"{j + 1}.  {_line_text(ln)}", h=4.5, w=inner - 2)
         pdf.set_xy(x0, y + height)
     total = f"{len(pallets)} pallet{'' if len(pallets) == 1 else 's'} · {sum(map(_cartons, pallets))} cartons · {_kg(sum(map(_pallet_kg, pallets)))} kg"
-    text(7, "TOTAL", "B", border=1, w=col, h=8, align="C")
+    text(7, "TOTAAL / TOTAL", "B", border=1, w=col, h=8, align="C")
     value(total, "B", border=1, w=w - col, h=8, new_x="LMARGIN", new_y="NEXT")
 
     # The two dates, then the small print at the very bottom, boxed on under the table.
     y = pdf.get_y()
-    for x, title, v in ((x0, "OPLAAIDATUM", n.loaded_on), (x0 + half, "AFLAAIDATUM", n.offloaded_on)):
+    for x, title, v in ((x0, "OPLAAIDATUM / LOAD DATE", n.loaded_on), (x0 + half, "AFLAAIDATUM / OFFLOAD DATE", n.offloaded_on)):
         pdf.rect(x, y, half, 8)
         pdf.set_xy(x + 1.5, y + 1.5)
         pdf.set_font("Helvetica", "", 7)
