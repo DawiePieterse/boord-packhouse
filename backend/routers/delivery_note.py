@@ -235,10 +235,15 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     for line in CONTACT:
         text(8, line, h=4, w=w, align="R", new_x="LMARGIN", new_y="NEXT")
     pdf.set_y(top + 15)
-    text(11, "AFLEWERINGSNOTA", "B", h=7, w=46)
-    pdf.set_text_color(200, 0, 0)
-    text(14, str(n.note_no), "B", h=7, new_x="LMARGIN", new_y="NEXT")
-    pdf.set_text_color(0, 0, 0)
+
+    def title_no():
+        text(11, "AFLEWERINGSNOTA", "B", h=7, w=46)
+        pdf.set_text_color(200, 0, 0)
+        text(14, str(n.note_no), "B", h=7, w=30)
+        pdf.set_text_color(0, 0, 0)
+
+    title_no()
+    pdf.ln()
 
     # Afsender | Ontvanger, the same way (capitals, as the printed sender), then
     # three equal signature boxes.
@@ -287,8 +292,9 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     footer = 18
 
     def head():
-        if pdf.page_no() > 1:  # a later page says whose it is
-            text(9, f"AFLEWERINGSNOTA {n.note_no}  ·  page {pdf.page_no()} of {{nb}}", "B", h=7, new_x="LMARGIN", new_y="NEXT")
+        if pdf.page_no() > 1:  # a later page says whose it is, as the first page does
+            title_no()
+            text(9, f"page {pdf.page_no()} of {{nb}}", h=7, align="R", new_x="LMARGIN", new_y="NEXT")
         pdf.set_xy(x0, pdf.get_y())
         label("PALLET NO", border=1, w=col, align="C")
         label("BESKRYWING VAN INHOUD", border=1, w=w - col, align="C", new_x="LMARGIN", new_y="NEXT")
