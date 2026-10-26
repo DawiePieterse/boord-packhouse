@@ -43,16 +43,17 @@ const IDB = (() => {
       return (await this.all()).filter((r) => !r.synced);
     },
     // Only rows that have not changed since they were sent: a run ended on
-    // this tablet while its start was in flight must stay pending.
+    // this tablet while its start was in flight must stay pending, and so
+    // must a pallet edited again (rev) while it was being sent.
     async markSynced(sent, error = "") {
-      const stamp = (r) => `${r.dip_ended_at || ""}|${r.ended_at || ""}`;
+      const stamp = (r) => `${r.dip_ended_at || ""}|${r.ended_at || ""}|${r.rev || ""}`;
       const want = new Map(sent.map((r) => [r.uuid, stamp(r)]));
       const rows = (await this.all()).filter((r) => want.has(r.uuid) && want.get(r.uuid) === stamp(r));
       await run("readwrite", (s) => rows.forEach((r) => s.put({ ...r, synced: 1, error })));
     },
     async prune() {
       const cutoff = new Date(Date.now() - PRUNE_AFTER_DAYS * 864e5).toISOString();
-      const stale = (await this.all()).filter((r) => r.synced && (r.started_at || r.changed_at || r.checked_at) < cutoff);
+      const stale = (await this.all()).filter((r) => r.synced && (r.started_at || r.changed_at || r.checked_at || r.scanned_at || r.created_at) < cutoff);
       await run("readwrite", (s) => stale.forEach((r) => s.delete(r.uuid)));
     },
   };

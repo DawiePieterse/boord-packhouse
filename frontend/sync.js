@@ -3,7 +3,7 @@
 // - What the screens need is cached in localStorage and refreshed whenever
 //   the server answers: Boord's workers (badge scan), tents, fruit sources,
 //   the suggested-time settings, the weather, the server's sulfur runs, the
-//   acid baths and their state.
+//   acid baths and their state, the consignments and the packs and markets.
 // - Records made on this tablet - sulfur runs, and acid batches, chemical
 //   changes and checks (marked by `kind`) - go to the IndexedDB outbox
 //   (idb.js) and are sent by syncNow() every SYNC_EVERY_MS, and at once after
@@ -84,6 +84,7 @@ const Store = (() => {
     ["/api/sulfur/sync", (rows) => ({ runs: ofKind(rows, "") })],
     ["/api/acid/sync", (rows) => ({ batches: ofKind(rows, "acid_batch"), changes: ofKind(rows, "acid_change"),
                                     checks: ofKind(rows, "acid_check") })],
+    ["/api/consignment/sync", (rows) => ({ consignments: ofKind(rows, "consignment"), pallets: ofKind(rows, "pallet") })],
   ];
 
   // The server's list with this tablet's own copies merged in, the local
@@ -98,6 +99,20 @@ const Store = (() => {
       if (kindOf(r) !== kind || r.error) continue;
       const server = all.get(r.uuid);
       if (!server || (!server.ended_at && r.ended_at) || (!server.dip_ended_at && r.dip_ended_at)) all.set(r.uuid, r);
+    }
+    return [...all.values()];
+  }
+
+  // Consignments and pallets are edited after they are sent, so unlike the
+  // runs above the server's copy only wins where this phone has nothing
+  // unsent: an unsent local copy goes over it.
+  function liveMerged(serverRows, kind) {
+    const all = new Map(serverRows.map((r) => [r.uuid, r]));
+    for (const r of localRuns.values()) {
+      if (kindOf(r) !== kind || r.error) continue;
+      const server = all.get(r.uuid);
+      if (!server) all.set(r.uuid, r);
+      else if (!r.synced) all.set(r.uuid, { ...server, ...r });
     }
     return [...all.values()];
   }
@@ -154,6 +169,10 @@ const Store = (() => {
       keep("ph_sulfur_settings", await Boord.api("/api/sulfur/settings"));
       keep("ph_acid", await Boord.api("/api/acid/state"));
       keep("ph_baths", await Boord.api("/api/baths"));
+      keep("ph_consignments", await Boord.api("/api/consignment/state"));
+      keep("ph_packaging", await Boord.api("/api/packaging"));
+      keep("ph_markets", await Boord.api("/api/markets"));
+      keep("ph_suppliers", await Boord.api("/api/suppliers"));
       if (Date.now() - lastWorkers > WORKERS_EVERY_MS) await refreshWorkers();
       if (failed) throw failed;
       const left = (await IDB.pending().catch(() => [])).length;
@@ -206,6 +225,15 @@ const Store = (() => {
     // /state as the server sent it, unmerged: its per-bath crate sums
     // (health), the batches it listed and every sulfur run dipped lately.
     acidState: () => cached("ph_acid", {}),
+
+    // Consignments and their pallets (the server's, consignment.py, and this
+    // phone's own unsent edits), and the packs and markets to pick from.
+    consignments: () => liveMerged(cached("ph_consignments", {}).consignments || [], "consignment")
+      .sort((a, b) => (a.created_at < b.created_at ? 1 : -1)),
+    pallets: () => liveMerged(cached("ph_consignments", {}).pallets || [], "pallet").filter((p) => !p.removed),
+    packaging: () => cached("ph_packaging", []),
+    markets: () => cached("ph_markets", []),
+    suppliers: () => cached("ph_suppliers", []),
 
     // Make or update a record: into the outbox first, then try to send it.
     async saveRun(r) {
