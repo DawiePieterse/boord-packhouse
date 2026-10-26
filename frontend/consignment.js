@@ -292,7 +292,11 @@ function onConsignmentClick(ev) {
     sync();
   }
   else if (t.dataset.drop) {
-    d.lines.splice(Number(t.dataset.drop), 1);
+    const i = Number(t.dataset.drop);
+    const l = d.lines[i];
+    // Ask first, unless nothing was entered (a new line's block is only copied from the line above).
+    if ((l.packaging_id != null || l.cartons !== "") && !confirm(`Delete line ${i + 1}?`)) return;
+    d.lines.splice(i, 1);
     if (!d.lines.length) d.lines.push({ packaging_id: null, cartons: "", block_id: "" }); // a pallet is deleted with its own button
     sync();
   }
