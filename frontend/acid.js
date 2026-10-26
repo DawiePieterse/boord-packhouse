@@ -257,7 +257,6 @@ async function saveCheck(card, bath) {
 }
 
 function onAcidInput(ev) {
-  Operator.touch();
   const card = ev.target.closest("[data-bath]");
   const field = ev.target.dataset.field;
   const bath = card && Store.baths().find((b) => b.id === Number(card.dataset.bath));
@@ -270,7 +269,6 @@ function onAcidInput(ev) {
 }
 
 function onAcidClick(ev) {
-  Operator.touch();
   const card = ev.target.closest("[data-bath]");
   const bath = card && Store.baths().find((b) => b.id === Number(card.dataset.bath));
   const hit = (sel) => ev.target.closest(sel);
