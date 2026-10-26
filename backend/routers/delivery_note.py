@@ -257,9 +257,11 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     pdf.rect(pdf.l_margin, y, w, 8)
     pdf.set_xy(pdf.l_margin + 1, y + 1.5)
     text(8, "TRANSPORTER:", "B", h=5, w=25)
-    text(10, n.transporter, h=5, w=half - 26)
-    text(7, "SEEL NR", h=5, w=13)
-    text(10, n.seal_no, h=5, w=20)
+    text(10, n.transporter, h=5, w=29)
+    text(7, "SEEL NR", h=5, w=12)
+    # A long seal number shrinks to fit rather than run into Verkoel op.
+    pdf.set_font("Helvetica", "", 10)
+    text(max(6, min(10, 10 * 33 / max(pdf.get_string_width(_latin(n.seal_no)), 1))), n.seal_no, h=5, w=34)
     text(7, "VERKOEL OP", h=5, w=17)
     text(10, f"{n.cooled_to} °C" if n.cooled_to else "°C", h=5, align="R", w=w - (pdf.get_x() - pdf.l_margin) - 1)
     y += 8
