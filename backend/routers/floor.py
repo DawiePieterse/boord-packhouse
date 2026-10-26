@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 
 import boord
 from db import get_packhouse_session
-from models import Bath, SulfurRun, Tent
+from models import Bath, Market, Packaging, SulfurRun, Tent
 
 router = APIRouter(prefix="/api", tags=["floor"])
 
@@ -36,3 +36,13 @@ def list_tents(session: Session = Depends(get_packhouse_session)):
 @router.get("/baths")
 def list_baths(session: Session = Depends(get_packhouse_session)):
     return session.exec(select(Bath).where(Bath.active == True).order_by(Bath.sort, Bath.id)).all()  # noqa: E712
+
+
+@router.get("/packaging")
+def list_packaging(session: Session = Depends(get_packhouse_session)):
+    return session.exec(select(Packaging).where(Packaging.active == True).order_by(Packaging.sort, Packaging.id)).all()  # noqa: E712
+
+
+@router.get("/markets")
+def list_markets(session: Session = Depends(get_packhouse_session)):
+    return session.exec(select(Market).where(Market.active == True).order_by(Market.sort, Market.id)).all()  # noqa: E712

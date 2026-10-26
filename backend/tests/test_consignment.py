@@ -1,0 +1,96 @@
+"""Consignments and pallets: the sulfur runs' idempotent sync, with editable
+pallets, a server-given pallet number (0001 each year) and a unique barcode."""
+from datetime import datetime, timezone
+
+import pytest
+
+
+def _iso(dt):
+    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+NOW = datetime.now(timezone.utc)
+LINE = {"packaging_id": 1, "packaging_name": "Pre-pac", "carton_kg": 0.48, "cartons": 60}
+
+
+def cons(uuid="c1", **kw):
+    return {"uuid": uuid, "market_id": 1, "market_name": "USA Sea Freight", "created_at": _iso(NOW), **kw}
+
+
+def pallet(uuid="p1", barcode="(00)060099005963004759", lines=None, **kw):
+    return {"uuid": uuid, "consignment_uuid": "c1", "barcode": barcode, "scanned_at": _iso(NOW),
+            "lines": [LINE] if lines is None else lines, **kw}
+
+
+def sync(client, consignments=(), pallets=()):
+    r = client.post("/api/consignment/sync", json={"device": "phone-1", "consignments": list(consignments),
+                                                   "pallets": list(pallets)})
+    assert r.status_code == 200
+    return r.json()
+
+
+def state(client):
+    return client.get("/api/consignment/state").json()
+
+
+def test_sync_is_idempotent_and_numbers_pallets_once(client):
+    out = sync(client, [cons()], [pallet("p1"), pallet("p2", barcode="B2")])
+    assert out["synced"] == ["c1", "p1", "p2"] and out["rejected"] == []
+    sync(client, [cons()], [pallet("p1"), pallet("p2", barcode="B2")])
+    pallets = state(client)["pallets"]
+    assert [(p["pallet_year"], p["pallet_no"]) for p in pallets] == [(NOW.astimezone().year, 1), (NOW.astimezone().year, 2)]
+    assert len(state(client)["consignments"]) == 1
+
+
+def test_a_pallet_can_be_edited_but_keeps_its_number(client):
+    sync(client, [cons()], [pallet()])
+    sync(client, [cons(market_id=5, market_name="Local")],
+         [pallet(barcode="NEW", lines=[{**LINE, "cartons": 61}])])
+    s = state(client)
+    assert s["consignments"][0]["market_name"] == "Local"
+    p = s["pallets"][0]
+    assert p["pallet_no"] == 1 and p["barcode"] == "NEW" and p["lines"][0]["cartons"] == 61
+
+
+def test_barcode_is_unique_until_the_pallet_is_removed(client):
+    sync(client, [cons()], [pallet("p1")])
+    out = sync(client, pallets=[pallet("p2")])
+    assert out["synced"] == [] and "already on pallet" in out["rejected"][0]["error"]
+    sync(client, pallets=[pallet("p1", removed=True)])
+    assert state(client)["pallets"] == []
+    assert sync(client, pallets=[pallet("p2")])["synced"] == ["p2"]
+    assert state(client)["pallets"][0]["pallet_no"] == 2  # p1's number is not reused
+
+
+@pytest.mark.parametrize("bad", [
+    {"consignment_uuid": "nope"}, {"barcode": "  "}, {"lines": []},
+    {"lines": [{**LINE, "cartons": 0}]}, {"lines": [{**LINE, "carton_kg": 0}]}, {"lines": [{**LINE, "packaging_name": ""}]},
+])
+def test_bad_pallets_are_rejected_not_stored(client, bad):
+    out = sync(client, [cons()], [pallet(**bad)])
+    assert out["rejected"][0]["uuid"] == "p1"
+    assert state(client)["pallets"] == []
+
+
+def test_unknown_market_is_rejected(client):
+    assert sync(client, [cons(market_id=99)])["rejected"][0]["error"] == "unknown market"
+
+
+def test_settings_need_the_pin_and_floor_lists_do_not(client, admin_client):
+    admin_client.post("/api/admin/logout")
+    assert client.get("/api/settings/packaging").status_code == 401
+    assert client.get("/api/settings/markets").status_code == 401
+    assert client.post("/api/settings/packaging", json={"name": "x", "carton_kg": 1}).status_code == 401
+    assert [m["name"] for m in client.get("/api/markets").json()][:2] == ["USA Sea Freight", "USA Air Freight"]
+    assert client.get("/api/packaging").json()[0]["carton_kg"] == 0.48
+
+
+def test_settings_add_edit_retire(admin_client):
+    r = admin_client.post("/api/settings/packaging", json={"name": "500g", "carton_kg": 0.55})
+    assert r.status_code == 200 and r.json()["sort"] == 4
+    admin_client.put(f"/api/settings/packaging/{r.json()['id']}", json={"name": "500g", "carton_kg": 0.55, "active": False})
+    assert "500g" not in [p["name"] for p in admin_client.get("/api/packaging").json()]
+    assert admin_client.post("/api/settings/packaging", json={"name": "x", "carton_kg": 0}).status_code == 422
+    assert admin_client.post("/api/settings/markets", json={"name": " "}).status_code == 422
+    m = admin_client.post("/api/settings/markets", json={"name": "Middle East"}).json()
+    assert m["sort"] == 5 and admin_client.put("/api/settings/markets/99", json={"name": "x"}).status_code == 404

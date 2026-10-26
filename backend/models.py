@@ -199,3 +199,55 @@ class BathCheck(SQLModel, table=True):
     by_name: str = ""
     device: str = ""
     synced_at: Optional[datetime] = None
+
+
+class Packaging(SQLModel, table=True):
+    """A pack the consignment screen offers, set up in Settings -> Consignment:
+    "Pre-pac" at 0.48 kg, "1kg XXL" at 1.1 kg. carton_kg is the real weight of
+    a full carton, so cartons x carton_kg is the kg on the pallet. Retired,
+    never deleted: a pallet's lines copy the name and weight anyway."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    carton_kg: float
+    sort: int = 0
+    active: bool = True
+
+
+class Market(SQLModel, table=True):
+    """Where a consignment is going (USA Sea Freight, Local...), set up in
+    Settings -> Consignment. Retired, never deleted."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    sort: int = 0
+    active: bool = True
+
+
+class Consignment(SQLModel, table=True):
+    """The paper consignment sheet: a market and its pallets. Made on a phone
+    with its own uuid and sent by POST /api/consignment/sync, like a sulfur
+    run. There is no consignment number yet; the date it was made stands in."""
+    uuid: str = Field(primary_key=True)
+    market_id: int = Field(foreign_key="market.id")
+    market_name: str = ""
+    created_at: datetime
+    device: str = ""
+    synced_at: Optional[datetime] = None
+
+
+class Pallet(SQLModel, table=True):
+    """One pallet on a consignment, identified by the code scanned off its
+    label (barcode). pallet_year / pallet_no is the farm's own simple number
+    (0001 each year), given by the server the first time the pallet arrives
+    and never changed. lines is a JSON list of {packaging_id, packaging_name,
+    carton_kg, cartons}: what is on it. removed pallets stay (their number was
+    given) but free their barcode."""
+    uuid: str = Field(primary_key=True)
+    consignment_uuid: str = Field(foreign_key="consignment.uuid")
+    barcode: str
+    scanned_at: datetime
+    lines: str = "[]"
+    removed: bool = False
+    pallet_year: Optional[int] = None
+    pallet_no: Optional[int] = None
+    device: str = ""
+    synced_at: Optional[datetime] = None

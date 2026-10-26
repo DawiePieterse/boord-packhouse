@@ -67,10 +67,11 @@ def client():
 
     # https, because the settings cookie is Secure and httpx will not send a
     # Secure cookie back over plain http.
-    from sqlmodel import Session, delete
+    from sqlmodel import Session, delete, select
 
     from db import packhouse_engine
-    from models import AcidBatch, Bath, BathCheck, ChemicalChange, SulfurRun, SulfurSettings, Tent
+    from models import (AcidBatch, Bath, BathCheck, ChemicalChange, Consignment, Market, Packaging, Pallet,
+                        SulfurRun, SulfurSettings, Tent)
 
     with TestClient(main.app, base_url="https://testserver") as c:
         with Session(packhouse_engine) as s:
@@ -84,7 +85,7 @@ def client():
                 t.name, t.active, t.sort, t.default_grams, t.default_minutes, t.default_crates = (
                     f"Tent {letter}", True, i, 425.0, 60, 24)
                 s.add(t)
-            for model in (AcidBatch, ChemicalChange, BathCheck):
+            for model in (AcidBatch, ChemicalChange, BathCheck, Pallet, Consignment):
                 s.exec(delete(model))
             # Back to the two seeded baths.
             s.exec(delete(Bath).where(Bath.id > 2))
@@ -93,6 +94,12 @@ def client():
                 b.name, b.active, b.sort, b.default_dip_minutes, b.default_dry_minutes = f"Bath {n}", True, n - 1, 5, 30
                 b.default_crates, b.change_days, b.change_crates = 24, 3.5, 500
                 s.add(b)
+            # Back to the seeded markets and packs.
+            s.exec(delete(Market).where(Market.id > 5))
+            s.exec(delete(Packaging).where(Packaging.id > 4))
+            for m in s.exec(select(Market)).all():
+                m.active = True
+                s.add(m)
             s.commit()
         if os.path.exists(admin_auth.PIN_FILE):
             os.remove(admin_auth.PIN_FILE)

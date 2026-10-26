@@ -19,11 +19,11 @@ import config
 from backup import start_backup_scheduler
 from boord import BOORD_SCHEMA_CHECK
 from db import boord_engine, init_packhouse_db
-from routers import acid, admin, backups, baths, floor, sulfur, sulfur_report, tents, version, weather
+from routers import acid, admin, backups, baths, consignment, consignment_settings, floor, sulfur, sulfur_report, tents, version, weather
 
 app = FastAPI(title="Boord Packhouse")
 
-for module in (acid, admin, backups, baths, floor, sulfur, sulfur_report, tents, version, weather):
+for module in (acid, admin, backups, baths, consignment, consignment_settings, floor, sulfur, sulfur_report, tents, version, weather):
     app.include_router(module.router)
 
 
