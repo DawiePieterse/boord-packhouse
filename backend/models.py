@@ -263,23 +263,54 @@ class Pallet(SQLModel, table=True):
     synced_at: Optional[datetime] = None
 
 
+class Transporter(SQLModel, table=True):
+    """Who carries a delivery note's load (Self, Go Fresh...), set up in
+    Settings -> Delivery Note. Retired, never deleted while a note uses it;
+    a note copies the name."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    sort: int = 0
+    active: bool = True
+
+
+class Receiver(SQLModel, table=True):
+    """Who a delivery note is for: name, market and city, set up in Settings ->
+    Delivery Note. A note copies them as its receiver text, one per line."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    market: str = ""
+    city: str = ""
+    sort: int = 0
+    active: bool = True
+
+
+class DeliveryNoteSettings(SQLModel, table=True):
+    """Settings -> Delivery Note's numbers. One row."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    cooled_to: float = 8.0      # a new note's "Verkoel op", °C
+
+
 class DeliveryNote(SQLModel, table=True):
     """The paper delivery note (Afleweringsnota), made on a phone with its own
     uuid and sent by POST /api/deliverynote/sync like a pallet: editable, the
     latest copy wins. note_no is the number on the note, typed once (carrying
     on from the paper book) and then offered as the highest + 1; unique among
-    live notes. lines is a JSON list of {count, description}: "120" x "1kg XL
-    TMR Litchis". Dates are farm-local "YYYY-MM-DD"."""
+    live notes. pallets is a JSON list of the Pallet Stack pallets on the
+    truck, each a copy taken when the note was saved ({uuid, pallet_ref,
+    barcode, date_code, supplier_name, market_name, lines}); a pallet is on at
+    most one live note. Dates are farm-local "YYYY-MM-DD"."""
     uuid: str = Field(primary_key=True)
     note_no: int
     created_at: datetime
-    receiver: str = ""          # Ontvanger, several lines
+    receiver_id: Optional[int] = None    # Settings' receiver, its name, market and city copied:
+    receiver: str = ""                   # Ontvanger, one per line
+    transporter_id: Optional[int] = None
     transporter: str = ""
     seal_no: str = ""
     cooled_to: str = ""         # Verkoel op, in °C
     loaded_on: str = ""         # Oplaaidatum
     offloaded_on: str = ""      # Aflaaidatum, optional
-    lines: str = "[]"
+    pallets: str = "[]"
     made_by: str = ""           # Boord worker.id from the badge of who made it; never changes
     made_by_name: str = ""
     changed_by: str = ""

@@ -45,15 +45,7 @@ function palletsView() {
   const pallets = newestFirst().filter((p) => sameDay(p.scanned_at) || p.error);
   const rows = pallets.map((p) => `
     <button type="button" data-pallet="${esc(p.uuid)}" class="w-full text-left border-t py-2 active:bg-slate-50">
-      <div class="flex justify-between gap-3 items-baseline">
-        <div class="font-bold text-lg">Pallet ${esc(p.pallet_ref || "---")}</div>
-        <div class="text-sm shrink-0"><b>${palletCartons(p)}</b> cartons · ${kgText(palletKg(p))}</div>
-      </div>
-      <div class="text-sm">${esc(palletDateCode(p))} · ${esc(p.supplier_name || "-")} · ${esc(p.market_name || "-")}</div>
-      <div class="text-xs text-slate-500 truncate">Barcode ${esc(p.barcode)}${p.scanned_by_name ? ` · ${esc(p.scanned_by_name)}` : ""}</div>
-      <ol class="list-decimal pl-6 mt-1 text-sm">
-        ${p.lines.map((l) => `<li><b>${l.cartons}</b> x ${esc(l.packaging_name)}${l.block_id ? `, ${esc(l.block_name)}${l.variety ? `, ${esc(l.variety)}` : ""}` : ""}, Litchis</li>`).join("")}
-      </ol>
+      ${palletSummary(p)}
       ${p.error ? `<div class="text-sm text-red-600 mt-1">Not saved: ${esc(p.error)}. Tap to fix it.</div>` : ""}
     </button>`).join("");
   return `
@@ -67,6 +59,19 @@ function palletsView() {
       ${rows || `<div class="text-center text-slate-400 text-sm py-6 border-t">No pallets yet today</div>`}
     </div>`;
 }
+
+// One pallet as the list shows it: number, cartons and kg, date code, supplier,
+// market, barcode and its lines. The delivery note shows pallets the same way.
+const palletSummary = (p) => `
+      <div class="flex justify-between gap-3 items-baseline">
+        <div class="font-bold text-lg">Pallet ${esc(p.pallet_ref || "---")}</div>
+        <div class="text-sm shrink-0"><b>${palletCartons(p)}</b> cartons · ${kgText(palletKg(p))}</div>
+      </div>
+      <div class="text-sm">${esc(palletDateCode(p))} · ${esc(p.supplier_name || "-")} · ${esc(p.market_name || "-")}</div>
+      <div class="text-xs text-slate-500 truncate">Barcode ${esc(p.barcode)}${p.scanned_by_name ? ` · ${esc(p.scanned_by_name)}` : ""}</div>
+      <ol class="list-decimal pl-6 mt-1 text-sm">
+        ${p.lines.map((l) => `<li><b>${l.cartons}</b> x ${esc(l.packaging_name)}${l.block_id ? `, ${esc(l.block_name)}${l.variety ? `, ${esc(l.variety)}` : ""}` : ""}, Litchis</li>`).join("")}
+      </ol>`;
 
 // ---- A pallet: scan its label, then what is on it ---------------------------
 

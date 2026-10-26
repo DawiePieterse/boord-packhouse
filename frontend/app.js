@@ -161,6 +161,7 @@ const SETTINGS_PAGES = [
   { id: "sulfur",    name: "Sulfur",    icon: "fa-tent",       parked: true, load: () => { loadTentSettings(); loadSulfurSettings(); loadSulfurReport(); } },
   { id: "acid",      name: "Acid",      icon: "fa-flask",      parked: true, load: loadBathSettings },
   { id: "palletstack", name: "Pallet Stack", icon: "", iconHtml: PALLET_BOXES, load: loadConsignmentSettings },
+  { id: "deliverynote", name: "Delivery Note", icon: "fa-file-lines", load: loadDeliverySettings },
   { id: "setup",     name: "Setup",     icon: "fa-screwdriver-wrench", load: loadBackupsList },
 ];
 

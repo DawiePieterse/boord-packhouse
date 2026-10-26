@@ -70,8 +70,8 @@ def client():
     from sqlmodel import Session, delete, select
 
     from db import packhouse_engine
-    from models import (AcidBatch, Bath, BathCheck, ChemicalChange, Consignment, DeliveryNote, Market, Packaging, Pallet,
-                        SulfurRun, SulfurSettings, Tent)
+    from models import (AcidBatch, Bath, BathCheck, ChemicalChange, Consignment, DeliveryNote, DeliveryNoteSettings, Market, Packaging, Pallet,
+                        Receiver, SulfurRun, SulfurSettings, Tent, Transporter)
 
     with TestClient(main.app, base_url="https://testserver") as c:
         with Session(packhouse_engine) as s:
@@ -100,6 +100,13 @@ def client():
             for m in s.exec(select(Market)).all():
                 m.active = True
                 s.add(m)
+            # Back to the seeded transporters, receivers and 8 °C.
+            s.exec(delete(Transporter).where(Transporter.id > 2))
+            s.exec(delete(Receiver).where(Receiver.id > 2))
+            for r in s.exec(select(Transporter)).all() + s.exec(select(Receiver)).all():
+                r.active = True
+                s.add(r)
+            s.get(DeliveryNoteSettings, 1).cooled_to = 8.0
             s.commit()
         if os.path.exists(admin_auth.PIN_FILE):
             os.remove(admin_auth.PIN_FILE)
