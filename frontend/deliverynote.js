@@ -1,7 +1,7 @@
 // The Delivery Note role (the paper Afleweringsnota) on a phone: the recent
 // notes, then one note to fill in - receiver and transporter (picked from
 // Settings -> Delivery Note), seal, cooled to, the loading and offloading
-// dates, and the pallets on the truck, ticked off the Pallet Stack list and
+// dates, and the pallets in this delivery, ticked off the Pallet Stack list and
 // shown as it shows them - and its PDF, laid out as the paper note, to print
 // or share.
 //
@@ -139,9 +139,9 @@ function noteForm() {
     </div>
     <div class="bg-white rounded-2xl shadow px-4 pb-1">
       <div class="${LIST_HEAD}">
-        <div class="text-lg font-bold">Pallets on the truck</div>
+        <div class="text-lg font-bold">Pallets in this delivery</div>
         <div id="noteTotals" class="text-base">${noteTotals(picked)}</div>
-        <div class="text-xs text-white/80">Tick the pallets from Pallet Stack that go on this truck.</div>
+        <div class="text-xs text-white/80">Tick the pallets from Pallet Stack that go in this delivery.</div>
       </div>
       ${pallets || `<div class="text-center text-slate-400 text-sm py-6 border-t">No pallets left to send</div>`}
     </div>
@@ -203,7 +203,7 @@ async function saveNote() {
   if (!receiver) return fail("Pick the receiver.");
   if (!transporter) return fail("Pick the transporter.");
   if (!d.loaded_on) return fail("Pick the loading date.");
-  if (!pallets.length) return fail("Tick the pallets on the truck.");
+  if (!pallets.length) return fail("Tick the pallets in this delivery.");
   const op = Operator.current() || {};
   const base = d.note || { kind: "delivery_note", created_at: new Date(Store.now()).toISOString(),
                            made_by: op.id || "", made_by_name: op.name || "" };
