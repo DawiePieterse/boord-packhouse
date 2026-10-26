@@ -19,6 +19,13 @@ let sealScanner = null;
 
 const dnToday = () => new Date(Store.now()).toLocaleDateString("en-CA"); // YYYY-MM-DD, farm-local
 const dnDay = (v) => (v ? v.split("-").reverse().join("/") : "");
+// The day after a YYYY-MM-DD (noon, so a daylight-saving shift never skips a day).
+function dayAfter(v) {
+  if (!v) return "";
+  const d = new Date(`${v}T12:00:00`);
+  d.setDate(d.getDate() + 1);
+  return d.toLocaleDateString("en-CA");
+}
 // The number is typed on the first note (carrying on from the paper book), and
 // every new note after it offers the highest so far + 1: this phone's notes,
 // or the highest the server has ever had.
@@ -70,7 +77,7 @@ function openNote(note) {
         seal_no: note.seal_no, cooled_to: note.cooled_to, loaded_on: note.loaded_on, offloaded_on: note.offloaded_on,
         picked: note.pallets.map((p) => p.uuid) }
     : { uuid: Boord.uuid(), note: null, no: nextNoteNo(), receiver_id: null, transporter_id: null, seal_no: "",
-        cooled_to: opts.cooled_to == null ? "" : String(opts.cooled_to), loaded_on: dnToday(), offloaded_on: "", picked: [] };
+        cooled_to: opts.cooled_to == null ? "" : String(opts.cooled_to), loaded_on: dnToday(), offloaded_on: dayAfter(dnToday()), picked: [] };
   renderDeliveryNote();
 }
 
@@ -126,8 +133,8 @@ function noteForm() {
       <div id="sealReader" class="hidden w-full rounded-lg overflow-hidden bg-black min-h-[200px]"></div>
       <div id="sealMsg" class="text-sm text-red-600 empty:hidden"></div>
       <div class="flex gap-2">
-        ${label("Loaded", input("loaded_on", `type="date"`), "flex-1 min-w-0")}
-        ${label("Offloaded", input("offloaded_on", `type="date"`), "flex-1 min-w-0")}
+        ${label("Load date", input("loaded_on", `type="date"`), "flex-1 min-w-0")}
+        ${label("Offload date", input("offloaded_on", `type="date"`), "flex-1 min-w-0")}
       </div>
     </div>
     <div class="bg-white rounded-2xl shadow px-4 pb-1">
@@ -266,6 +273,15 @@ function onDeliveryInput(ev) {
   const v = ev.target.value;
   if (f === "receiver" || f === "transporter") dn.draft[`${f}_id`] = v ? Number(v) : null;
   else if (f === "no") { dn.draft.no = v.replace(/\D/g, ""); ev.target.value = dn.draft.no; }
+  else if (f === "loaded_on") {
+    // The offload date follows the load date (the next day) until it is set by hand.
+    const follows = !dn.draft.offloaded_on || dn.draft.offloaded_on === dayAfter(dn.draft.loaded_on);
+    dn.draft.loaded_on = v;
+    if (follows) {
+      dn.draft.offloaded_on = dayAfter(v);
+      document.querySelector('#deliveryBody [data-field="offloaded_on"]').value = dn.draft.offloaded_on;
+    }
+  }
   else dn.draft[f] = v;
 }
 
