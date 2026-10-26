@@ -166,7 +166,7 @@ function palletForm() {
       <button type="button" data-addline class="text-blue-700 font-semibold"><i class="fa-solid fa-plus"></i> Another pack</button>
       <div id="palletTotal" class="text-sm bg-slate-50 rounded-lg p-3"></div>
       <button type="button" data-save class="w-full boord-btn-primary rounded-xl py-4 text-lg font-bold">Save pallet</button>
-      ${d.pallet ? `<button type="button" data-remove class="w-full border border-red-300 text-red-700 rounded-xl py-3 font-semibold">Take this pallet off</button>` : ""}
+      ${d.pallet ? `<button type="button" data-remove class="w-full border border-red-300 text-red-700 rounded-xl py-3 font-semibold">Delete pallet</button>` : ""}
     </div>`;
 }
 
@@ -245,7 +245,7 @@ async function savePallet() {
 
 async function removePallet() {
   const d = cn.draft;
-  if (!confirm(`Take this pallet off the stack?`)) return;
+  if (!confirm("Delete this pallet?")) return;
   await Store.saveRun({ ...d.pallet, kind: "pallet", removed: true, rev: Date.now() });
   cn.view = "detail";
   renderConsignment();
@@ -284,7 +284,7 @@ function onConsignmentClick(ev) {
   else if ("addline" in t.dataset) { d.lines.push({ packaging_id: null, cartons: "" }); sync(); }
   else if (t.dataset.drop) {
     d.lines.splice(Number(t.dataset.drop), 1);
-    if (!d.lines.length) d.lines.push({ packaging_id: null, cartons: "" }); // a pallet takes off the stack with its own button
+    if (!d.lines.length) d.lines.push({ packaging_id: null, cartons: "" }); // a pallet is deleted with its own button
     cn.focusLine = null;
     sync();
   }
