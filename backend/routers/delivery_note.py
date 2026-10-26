@@ -202,17 +202,17 @@ def _day(v: str) -> str:
 
 @router.get("/{uuid}/pdf")
 def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
-    """The note as the paper Afleweringsnota, on A5, signature lines blank."""
+    """The note as the paper Afleweringsnota, on A4, signature lines blank."""
     from fpdf import FPDF
     n = session.get(DeliveryNote, uuid)
     if n is None or n.removed:
         raise HTTPException(404, "No such delivery note")
-    pdf = FPDF(format="A5")
-    pdf.set_margins(10, 10, 10)
-    pdf.set_auto_page_break(True, margin=10)
+    pdf = FPDF(format="A4")
+    pdf.set_margins(15, 15, 15)
+    pdf.set_auto_page_break(True, margin=15)
     pdf.alias_nb_pages()
     pdf.add_page()
-    w = pdf.epw  # 128 mm
+    w = pdf.epw  # 180 mm
     half = w / 2
 
     def text(size, value, style="", h=5, **kw):
@@ -240,37 +240,44 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     text(14, str(n.note_no), "B", h=7, new_x="LMARGIN", new_y="NEXT")
     pdf.set_text_color(0, 0, 0)
 
-    # Afsender | Ontvanger, the same way; under each, its signatures: the
-    # sender's under Afsender, the receiver's and the driver's under Ontvanger.
+    # Afsender | Ontvanger, the same way (capitals, as the printed sender), then
+    # three equal signature boxes.
     x0, y = pdf.l_margin, pdf.get_y()
     pdf.rect(x0, y, w, 30)
     pdf.line(x0 + half, y, x0 + half, y + 30)
-    for x, title, lines in ((x0, "AFSENDER", SENDER), (x0 + half, "ONTVANGER", n.receiver.strip().split("\n"))):
+    for x, title, lines in ((x0, "AFSENDER", SENDER), (x0 + half, "ONTVANGER", n.receiver.strip().upper().split("\n"))):
         pdf.set_xy(x + 1.5, y + 1)
         label(title, h=4)
         for i, line in enumerate(lines[:5]):
             pdf.set_xy(x + 1.5, y + 6 + i * 5)
             value(line, w=half - 3)
     y += 30
-    pdf.rect(x0, y, w, 13)
-    for x in (x0 + half, x0 + half * 1.5):
-        pdf.line(x, y, x, y + 13)
-    for x, title in ((x0, "HANDTEKENING AFSENDER"), (x0 + half, "HANDTEKENING ONTVANGER"), (x0 + half * 1.5, "HANDTEKENING DRYWER")):
-        pdf.set_xy(x + 1.5, y + 1)
-        text(5.5, title, h=3)
-    y += 13
+    # Two rows in thirds, the dividing lines one above the other: the
+    # signatures, then Transporter | Seel nr | Verkoel op.
+    third = w / 3
+    for height in (13, 8):
+        pdf.rect(x0, y, w, height)
+        for k in (1, 2):
+            pdf.line(x0 + k * third, y, x0 + k * third, y + height)
+        if height == 13:
+            for k, title in enumerate(("HANDTEKENING AFSENDER", "HANDTEKENING ONTVANGER", "HANDTEKENING DRYWER")):
+                pdf.set_xy(x0 + k * third + 1.5, y + 1)
+                text(6, title, h=3)
+        y += height
+    y -= 8
 
-    # Transporter, Seel Nr, Verkoel op.
-    pdf.rect(x0, y, w, 8)
-    pdf.set_xy(x0 + 1.5, y + 1.5)
-    label("TRANSPORTER", w=21)
-    value(n.transporter, w=33)
-    label("SEEL NR", w=12)
-    # A long seal number shrinks to fit rather than run into Verkoel op.
-    pdf.set_font("Helvetica", "", 10)
-    text(max(6, min(10, 10 * 31 / max(pdf.get_string_width(_latin(n.seal_no)), 1))), n.seal_no, h=5, w=32)
-    label("VERKOEL OP", w=16)
-    value(f"{n.cooled_to} °C" if n.cooled_to else "°C", align="R", w=w - (pdf.get_x() - x0) - 1.5)
+    # A filled-in value shrinks to fit its third rather than run over the line.
+    def fitted(v, room):
+        pdf.set_font("Helvetica", "", 10)
+        text(max(6, min(10, 10 * room / max(pdf.get_string_width(_latin(v)), 1))), v, h=5, w=room)
+
+    for k, (title, v) in enumerate((("TRANSPORTER", n.transporter), ("SEEL NR", n.seal_no),
+                                    ("VERKOEL OP", f"{n.cooled_to} °C" if n.cooled_to else "°C"))):
+        pdf.set_xy(x0 + k * third + 1.5, y + 1.5)
+        pdf.set_font("Helvetica", "", 7)
+        room = pdf.get_string_width(title) + 3  # the label's own width, then a gap
+        label(title, w=room)
+        fitted(v, third - room - 3)
     y += 8
 
     # Pallet no | Beskrywing van inhoud: each pallet a block of its own, shown
@@ -315,7 +322,7 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
             text(9, f"{j + 1}.  {_line_text(ln)}", h=4.5, w=inner - 2)
         pdf.set_xy(x0, y + height)
     total = f"{len(pallets)} pallet{'' if len(pallets) == 1 else 's'} · {sum(map(_cartons, pallets))} cartons · {_kg(sum(map(_pallet_kg, pallets)))} kg"
-    label("TOTAL", border=1, w=col, h=8, align="C")
+    text(7, "TOTAL", "B", border=1, w=col, h=8, align="C")
     value(total, "B", border=1, w=w - col, h=8, new_x="LMARGIN", new_y="NEXT")
 
     pdf.ln(1.5)
