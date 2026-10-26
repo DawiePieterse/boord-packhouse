@@ -74,7 +74,7 @@ const palletSummary = (p) => `
         <div class="text-sm shrink-0"><b>${palletCartons(p)}</b> cartons · ${kgText(palletKg(p))}</div>
       </div>
       <div class="text-sm">${esc(palletDateCode(p))} · ${esc(p.supplier_name || "-")} · ${esc(p.market_name || "-")}</div>
-      <div class="text-xs text-slate-500 truncate">Barcode ${esc(p.barcode)}${p.scanned_by_name ? ` · ${esc(p.scanned_by_name)}` : ""}</div>
+      <div class="text-xs text-slate-500 truncate empty:hidden">${[p.barcode && `Barcode ${esc(p.barcode)}`, p.scanned_by_name && esc(p.scanned_by_name)].filter(Boolean).join(" · ")}</div>
       <ol class="list-decimal pl-6 mt-1 text-sm">
         ${p.lines.map((l) => `<li><b>${l.cartons}</b> x ${esc(l.packaging_name)}${l.block_id ? `, ${esc(l.block_name)}${l.variety ? `, ${esc(l.variety)}` : ""}` : ""}, Litchis</li>`).join("")}
       </ol>`;
@@ -195,7 +195,7 @@ function palletForm() {
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
       <div id="palletReader" class="hidden w-full rounded-lg overflow-hidden bg-black min-h-[200px]"></div>
       <label class="block"><span class="text-xs font-semibold text-slate-600">Barcode</span>
-        <span class="flex gap-2"><input data-field="barcode" value="${esc(d.barcode)}" inputmode="numeric" placeholder="Scan the pallet label" class="flex-1 min-w-0 ${field}">
+        <span class="flex gap-2"><input data-field="barcode" value="${esc(d.barcode)}" inputmode="numeric" placeholder="Scan the pallet label (optional)" class="flex-1 min-w-0 ${field}">
         <button type="button" data-scan class="px-3 rounded-lg border border-slate-300"><i class="fa-solid fa-barcode text-xl"></i></button></span></label>
       <div class="flex gap-2">
         <label class="w-16 shrink-0"><span class="text-xs font-semibold text-slate-600">Pallet no</span>
@@ -286,13 +286,12 @@ async function savePallet() {
   if (!/^\d{3}$/.test(d.ref)) return fail("The pallet number is 3 digits, like 001.");
   if (!supplier) return fail("Pick the supplier.");
   if (!market) return fail("Pick the market.");
-  if (!barcode) return fail("Scan the pallet label first.");
   const twin = seasonPallets(d.pallet ? seasonOf(d.pallet.scanned_at) : seasonOf(nowIso())).find((p) => p.pallet_ref === d.ref && p.uuid !== d.uuid);
   if (twin) return fail(`Pallet ${d.ref} is already used this season.`);
   if (!lines.length) return fail("Pick a carton type and the number of cartons.");
   // A line with only one of the two is a slip, not a blank line to skip.
   if (d.lines.some((l) => (l.packaging_id != null) !== (Number(l.cartons) >= 1))) return fail("Every line needs a carton type and a number of cartons.");
-  const other = palletWithCode(barcode, d.uuid);
+  const other = barcode && palletWithCode(barcode, d.uuid);
   if (other) return fail(`That label is already on pallet ${other.pallet_ref}.`);
   stopPalletScan();
   const op = Operator.current() || {};

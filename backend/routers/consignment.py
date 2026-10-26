@@ -8,7 +8,7 @@ sent replaces the fields the phone owns. What the server owns, the pallet's
 year / number, is given once, the first time the pallet arrives.
 
 A stack only groups pallets: each pallet has its own supplier and market, and
-each of its lines (pack, cartons) its own block. A pallet's barcode is unique
+each of its lines (pack, cartons) its own block. A pallet's barcode is optional; when it has one, it is unique
 among the pallets still on a consignment.
 """
 import json
@@ -76,8 +76,6 @@ def _pallet_problem(rec: PalletIn, session: Session) -> Optional[str]:
     if session.get(Consignment, rec.consignment_uuid) is None:
         return "unknown consignment"
     barcode = rec.barcode.strip()
-    if not barcode:
-        return "a pallet needs its scanned barcode"
     if not rec.removed:
         if not (len(rec.pallet_ref) == 3 and rec.pallet_ref.isascii() and rec.pallet_ref.isdigit()):
             return "the pallet number is 3 digits"
@@ -96,9 +94,9 @@ def _pallet_problem(rec: PalletIn, session: Session) -> Optional[str]:
         problem = _lines_problem(rec.lines)
         if problem:
             return problem
-        other = session.exec(select(Pallet).where(Pallet.barcode == barcode, Pallet.uuid != rec.uuid,
-                                                  Pallet.removed == False)).first()  # noqa: E712
-        if other is not None:
+        other = barcode and session.exec(select(Pallet).where(Pallet.barcode == barcode, Pallet.uuid != rec.uuid,
+                                                              Pallet.removed == False)).first()  # noqa: E712
+        if other:
             return f"barcode already on pallet {other.pallet_year}-{other.pallet_no:04d}"
     return None
 

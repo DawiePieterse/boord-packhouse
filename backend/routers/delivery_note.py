@@ -319,7 +319,8 @@ def _draw(n: DeliveryNote, pages: int):
     pallets = json.loads(n.pallets or "[]")
     bottom = pdf.h - pdf.b_margin
     for i, p in enumerate(pallets):
-        height = 2 + 5 + 4.5 + 4.5 * len(p["lines"]) + 1.5
+        barcode = 4.5 if p["barcode"] else 0  # a pallet saved without one has no barcode line
+        height = 2 + 5 + barcode + 4.5 * len(p["lines"]) + 1.5
         last = i == len(pallets) - 1
         if pdf.get_y() + height + (8 + footer if last else 0) > bottom:
             pdf.add_page()
@@ -334,12 +335,13 @@ def _draw(n: DeliveryNote, pages: int):
         pdf.set_xy(right, y + 1.5)
         value(" · ".join(v or "-" for v in (p["date_code"], p["supplier_name"], p["market_name"])), w=inner * 0.6)
         text(9, f"{_cartons(p)} cartons · {_kg(_pallet_kg(p))} kg", h=5, w=inner * 0.4, align="R")
-        pdf.set_xy(right, y + 6.5)
-        pdf.set_text_color(90, 90, 90)
-        text(8, f"Barcode {p['barcode']}", h=4.5, w=inner)
-        pdf.set_text_color(0, 0, 0)
+        if barcode:
+            pdf.set_xy(right, y + 6.5)
+            pdf.set_text_color(90, 90, 90)
+            text(8, f"Barcode {p['barcode']}", h=4.5, w=inner)
+            pdf.set_text_color(0, 0, 0)
         for j, ln in enumerate(p["lines"]):
-            pdf.set_xy(right + 2, y + 11 + j * 4.5)
+            pdf.set_xy(right + 2, y + 6.5 + barcode + j * 4.5)
             text(9, f"{j + 1}.  {_line_text(ln)}", h=4.5, w=inner - 2)
         pdf.set_xy(x0, y + height)
     total = f"{len(pallets)} pallet{'' if len(pallets) == 1 else 's'} · {sum(map(_cartons, pallets))} cartons · {_kg(sum(map(_pallet_kg, pallets)))} kg"
