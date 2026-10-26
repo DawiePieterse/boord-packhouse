@@ -248,15 +248,17 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     # Afsender | Ontvanger, the same way (capitals, as the printed sender), then
     # three equal signature boxes.
     x0, y = pdf.l_margin, pdf.get_y()
-    pdf.rect(x0, y, w, 30)
-    pdf.line(x0 + half, y, x0 + half, y + 30)
-    for x, title, lines in ((x0, "AFSENDER", SENDER), (x0 + half, "ONTVANGER", n.receiver.strip().upper().split("\n"))):
+    addresses = ((x0, "AFSENDER", SENDER), (x0 + half, "ONTVANGER", n.receiver.strip().upper().split("\n")[:5]))
+    tall = 6 + 5 * max(len(lines) for _, _, lines in addresses) + 1.5  # as tall as the longer address, no more
+    pdf.rect(x0, y, w, tall)
+    pdf.line(x0 + half, y, x0 + half, y + tall)
+    for x, title, lines in addresses:
         pdf.set_xy(x + 1.5, y + 1)
         label(title, h=4)
-        for i, line in enumerate(lines[:5]):
+        for i, line in enumerate(lines):
             pdf.set_xy(x + 1.5, y + 6 + i * 5)
             value(line, w=half - 3)
-    y += 30
+    y += tall
     # Two rows in thirds, the dividing lines one above the other: the
     # signatures, then Transporter | Seel nr | Verkoel op.
     third = w / 3
@@ -296,8 +298,8 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
             title_no()
             text(9, f"page {pdf.page_no()} of {{nb}}", h=7, align="R", new_x="LMARGIN", new_y="NEXT")
         pdf.set_xy(x0, pdf.get_y())
-        label("PALLET NO", border=1, w=col, align="C")
-        label("BESKRYWING VAN INHOUD", border=1, w=w - col, align="C", new_x="LMARGIN", new_y="NEXT")
+        text(7, "PALLET NO", "B", border=1, w=col, h=6, align="C")
+        text(7, "BESKRYWING VAN INHOUD", "B", border=1, w=w - col, h=6, align="C", new_x="LMARGIN", new_y="NEXT")
 
     pdf.set_y(y)
     head()
