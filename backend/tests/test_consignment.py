@@ -14,7 +14,8 @@ LINE = {"packaging_id": 1, "packaging_name": "Pre-pac", "carton_kg": 0.48, "cart
 
 
 def cons(uuid="c1", **kw):
-    return {"uuid": uuid, "market_id": 1, "market_name": "USA Sea Freight", "created_at": _iso(NOW), **kw}
+    return {"uuid": uuid, "market_id": 1, "market_name": "USA Sea Freight", "supplier_id": 1,
+            "supplier_name": "Own fruit", "created_at": _iso(NOW), **kw}
 
 
 def pallet(uuid="p1", barcode="(00)060099005963004759", lines=None, **kw):
@@ -70,6 +71,18 @@ def test_bad_pallets_are_rejected_not_stored(client, bad):
     out = sync(client, [cons()], [pallet(**bad)])
     assert out["rejected"][0]["uuid"] == "p1"
     assert state(client)["pallets"] == []
+
+
+def test_suppliers_come_from_boord_own_farm_first(client):
+    assert client.get("/api/suppliers").json() == [
+        {"id": 1, "name": "Own fruit", "is_own_farm": True}, {"id": 2, "name": "Jansen Boerdery", "is_own_farm": False}]
+
+
+def test_supplier_is_kept_and_can_change(client):
+    sync(client, [cons()])
+    sync(client, [cons(supplier_id=2, supplier_name="Jansen Boerdery")])
+    c = state(client)["consignments"][0]
+    assert (c["supplier_id"], c["supplier_name"]) == (2, "Jansen Boerdery")
 
 
 def test_unknown_market_is_rejected(client):

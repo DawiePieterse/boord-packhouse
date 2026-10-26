@@ -31,6 +31,8 @@ class ConsignmentIn(SQLModel):
     uuid: str
     market_id: int
     market_name: str = ""
+    supplier_id: Optional[int] = None
+    supplier_name: str = ""
     created_at: datetime
 
 
@@ -103,6 +105,7 @@ def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
         if row is None:
             row = Consignment(uuid=rec.uuid, created_at=_utc_naive(rec.created_at), device=body.device, synced_at=now)
         row.market_id, row.market_name = rec.market_id, rec.market_name
+        row.supplier_id, row.supplier_name = rec.supplier_id, rec.supplier_name
         session.add(row)
         synced.append(rec.uuid)
     session.flush()  # a pallet sent in the same pass finds its consignment

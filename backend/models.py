@@ -229,6 +229,8 @@ class Consignment(SQLModel, table=True):
     uuid: str = Field(primary_key=True)
     market_id: int = Field(foreign_key="market.id")
     market_name: str = ""
+    supplier_id: Optional[int] = None   # Boord's supplier, name copied like a sulfur run's
+    supplier_name: str = ""
     created_at: datetime
     device: str = ""
     synced_at: Optional[datetime] = None

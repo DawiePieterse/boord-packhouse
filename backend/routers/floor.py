@@ -16,6 +16,11 @@ def list_workers():
     return boord.workers()
 
 
+@router.get("/suppliers")
+def list_suppliers():
+    return boord.suppliers()
+
+
 @router.get("/fruit-sources")
 def list_fruit_sources():
     return boord.fruit_sources()

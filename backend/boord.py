@@ -43,6 +43,13 @@ def workers() -> list:
              "photo": f"/photos/{r.photo_filename}" if r.photo_filename else ""} for r in rows]
 
 
+def suppliers() -> list:
+    """Every Boord supplier, the farm's own first: the consignment's supplier list."""
+    with boord_engine.connect() as conn:
+        rows = conn.execute(text("SELECT id, name, is_own_farm FROM supplier ORDER BY is_own_farm DESC, name")).all()
+    return [{"id": r.id, "name": r.name or f"Supplier {r.id}", "is_own_farm": bool(r.is_own_farm)} for r in rows]
+
+
 def fruit_sources(now: Optional[datetime] = None) -> list:
     """What the sulfur screen's Fruit source picker offers: the farm's own
     blocks and the other suppliers in lots received today, then those of the

@@ -172,6 +172,7 @@ const Store = (() => {
       keep("ph_consignments", await Boord.api("/api/consignment/state"));
       keep("ph_packaging", await Boord.api("/api/packaging"));
       keep("ph_markets", await Boord.api("/api/markets"));
+      keep("ph_suppliers", await Boord.api("/api/suppliers"));
       if (Date.now() - lastWorkers > WORKERS_EVERY_MS) await refreshWorkers();
       if (failed) throw failed;
       const left = (await IDB.pending().catch(() => [])).length;
@@ -232,6 +233,7 @@ const Store = (() => {
     pallets: () => liveMerged(cached("ph_consignments", {}).pallets || [], "pallet").filter((p) => !p.removed),
     packaging: () => cached("ph_packaging", []),
     markets: () => cached("ph_markets", []),
+    suppliers: () => cached("ph_suppliers", []),
 
     // Make or update a record: into the outbox first, then try to send it.
     async saveRun(r) {

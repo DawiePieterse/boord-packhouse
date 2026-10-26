@@ -37,7 +37,7 @@ function listView() {
   const rows = Store.consignments().map((c) => {
     const pallets = palletsOf(c);
     return `<button type="button" data-open="${esc(c.uuid)}" class="w-full bg-white rounded-2xl shadow p-4 text-left flex items-center justify-between gap-3 active:bg-slate-50">
-      <div><div class="font-bold">${esc(c.market_name)}</div><div class="text-sm text-slate-500">${esc(dayText(c.created_at))}</div></div>
+      <div><div class="font-bold">${esc(c.market_name)}</div><div class="text-sm text-slate-500">${esc(c.supplier_name ? `${c.supplier_name} · ` : "")}${esc(dayText(c.created_at))}</div></div>
       <div class="text-right text-sm"><div class="font-semibold">${pallets.length} pallet${pallets.length === 1 ? "" : "s"}</div>
         <div class="text-slate-500">${sum(pallets, palletCartons)} cartons · ${kgText(sum(pallets, palletKg))}</div></div>
     </button>`;
@@ -45,11 +45,15 @@ function listView() {
   return `
     <form data-new class="bg-white rounded-2xl shadow p-4 space-y-3">
       <div class="font-semibold">New consignment</div>
+      <select name="supplier" class="w-full border border-slate-300 rounded-lg p-3 text-lg">
+        ${Store.suppliers().map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}
+      </select>
       <select name="market" class="w-full border border-slate-300 rounded-lg p-3 text-lg">
         ${markets.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join("")}
       </select>
-      <button class="w-full boord-btn-primary rounded-xl py-4 text-lg font-bold"${markets.length ? "" : " disabled"}>Start consignment</button>
+      <button class="w-full boord-btn-primary rounded-xl py-4 text-lg font-bold"${markets.length && Store.suppliers().length ? "" : " disabled"}>Start consignment</button>
       ${markets.length ? "" : `<div class="text-sm text-slate-500">No markets yet - add them in Settings -> Consignment.</div>`}
+      ${Store.suppliers().length ? "" : `<div class="text-sm text-slate-500">No suppliers yet - the list comes from Boord, so connect once to load it.</div>`}
     </form>
     ${rows || `<div class="text-center text-slate-400 text-sm py-6">No consignments yet</div>`}`;
 }
@@ -58,6 +62,10 @@ function detailView(c) {
   const pallets = palletsOf(c);
   const markets = Store.markets();
   const options = markets.some((m) => m.id === c.market_id) ? markets : [{ id: c.market_id, name: c.market_name }, ...markets];
+  const suppliers = Store.suppliers();
+  // A consignment made before suppliers existed has none: show it blank, never as the first one.
+  const supplierOptions = c.supplier_id == null ? [{ id: "", name: "Supplier..." }, ...suppliers]
+    : suppliers.some((s) => s.id === c.supplier_id) ? suppliers : [{ id: c.supplier_id, name: c.supplier_name }, ...suppliers];
   const rows = pallets.map((p) => `
     <button type="button" data-pallet="${esc(p.uuid)}" class="w-full text-left border-t py-3 flex gap-3 items-start active:bg-slate-50">
       <div class="font-bold text-lg w-14 shrink-0">${pad(p.pallet_no)}</div>
@@ -73,6 +81,9 @@ function detailView(c) {
       <div class="text-slate-500 text-sm">${esc(dayText(c.created_at))}</div>
     </div>
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
+      <select data-supplier class="w-full border border-slate-300 rounded-lg p-3 text-lg font-semibold">
+        ${supplierOptions.map((s) => `<option value="${s.id}"${s.id === c.supplier_id ? " selected" : ""}>${esc(s.name)}</option>`).join("")}
+      </select>
       <select data-market class="w-full border border-slate-300 rounded-lg p-3 text-lg font-semibold">
         ${options.map((m) => `<option value="${m.id}"${m.id === c.market_id ? " selected" : ""}>${esc(m.name)}</option>`).join("")}
       </select>
@@ -228,18 +239,19 @@ async function removePallet() {
 
 async function startConsignment(ev) {
   ev.preventDefault();
-  const market = Store.markets().find((m) => m.id === Number(new FormData(ev.target).get("market")));
-  if (!market) return;
+  const f = new FormData(ev.target);
+  const market = Store.markets().find((m) => m.id === Number(f.get("market")));
+  const supplier = Store.suppliers().find((s) => s.id === Number(f.get("supplier")));
+  if (!market || !supplier) return;
   const uuid = Boord.uuid();
-  await Store.saveRun({ kind: "consignment", uuid, market_id: market.id, market_name: market.name, created_at: nowIso(), rev: Date.now() });
+  await Store.saveRun({ kind: "consignment", uuid, market_id: market.id, market_name: market.name,
+                        supplier_id: supplier.id, supplier_name: supplier.name, created_at: nowIso(), rev: Date.now() });
   cn = { view: "detail", consignment: uuid, draft: null };
   renderConsignment();
 }
 
-async function changeMarket(c, id) {
-  const market = Store.markets().find((m) => m.id === id);
-  if (!market) return;
-  await Store.saveRun({ ...c, kind: "consignment", market_id: market.id, market_name: market.name, rev: Date.now() });
+async function changeConsignment(c, change) {
+  await Store.saveRun({ ...c, ...change, kind: "consignment", rev: Date.now() });
 }
 
 function onConsignmentClick(ev) {
@@ -267,9 +279,11 @@ function onConsignmentInput(ev) {
     if (f === "pack") line.packaging_id = ev.target.value ? Number(ev.target.value) : null;
     else line.cartons = ev.target.value;
     updatePalletTotal();
-  } else if (ev.target.matches("[data-market]") && ev.type === "change") {
+  } else if (ev.type === "change" && ev.target.matches("[data-market], [data-supplier]")) {
     const c = Store.consignments().find((x) => x.uuid === cn.consignment);
-    if (c) changeMarket(c, Number(ev.target.value));
+    const isMarket = ev.target.matches("[data-market]");
+    const picked = (isMarket ? Store.markets() : Store.suppliers()).find((r) => r.id === Number(ev.target.value));
+    if (c && picked) changeConsignment(c, isMarket ? { market_id: picked.id, market_name: picked.name } : { supplier_id: picked.id, supplier_name: picked.name });
   }
 }
 
