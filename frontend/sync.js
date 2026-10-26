@@ -105,14 +105,16 @@ const Store = (() => {
 
   // Consignments and pallets are edited after they are sent, so unlike the
   // runs above the server's copy only wins where this phone has nothing
-  // unsent: an unsent local copy goes over it.
+  // unsent: an unsent local copy goes over it. A refused one stays in sight
+  // with its error (a pallet counted by hand must not vanish), to be fixed
+  // and saved again.
   function liveMerged(serverRows, kind) {
     const all = new Map(serverRows.map((r) => [r.uuid, r]));
     for (const r of localRuns.values()) {
-      if (kindOf(r) !== kind || r.error) continue;
+      if (kindOf(r) !== kind) continue;
       const server = all.get(r.uuid);
       if (!server) all.set(r.uuid, r);
-      else if (!r.synced) all.set(r.uuid, { ...server, ...r });
+      else if (!r.synced || r.error) all.set(r.uuid, { ...server, ...r });
     }
     return [...all.values()];
   }

@@ -1,16 +1,19 @@
-// The Consignment role: the paper consignment sheet on a phone. A consignment
-// is a market and its pallets; each pallet is the code scanned off its label
-// plus what is on it (one or more packs and a carton count each). Settings ->
-// Consignment sets the packs (with their real carton weight) and the markets.
+// The Pallet Stack role (the paper consignment sheet) on a phone: one screen
+// of pallets. Each pallet is the code scanned off its label, its supplier and
+// market, and what is on it: one or more lines of pack, cartons and block.
+// Settings -> Pallet Stack sets the packs (with their real carton weight) and
+// the markets.
 //
 // Made on the phone with a uuid and queued in Store's outbox (kind
-// consignment / pallet), the sulfur technique (sulfur.js), but both stay
-// editable: saving again re-queues the whole record (rev). The pallet's own
-// number (0001 each year) is given by the server the first time it arrives,
-// so a pallet saved with no signal shows "..." until then. Uses $, esc from
-// app.js and Html5Qrcode from shared/vendor.
+// consignment / pallet), the sulfur technique (sulfur.js), but pallets stay
+// editable: saving again re-queues the whole record (rev). A stack only
+// groups pallets and has no screen of its own yet: a new pallet goes on the
+// newest one, made the first time. Opens with the badge scan, like the sulfur
+// screen: a pallet keeps who scanned it in and who last changed it. Uses
+// Operator and renderOperatorBar from sulfur.js, $, esc from app.js and
+// Html5Qrcode from shared/vendor.
 
-let cn = { view: "list", consignment: null, draft: null };
+let cn = { view: "list", draft: null };
 let palletScanner = null;
 
 // The pallet number is typed once and then runs on: 001, 002... (or from 100).
@@ -26,96 +29,72 @@ const sum = (rows, f) => rows.reduce((n, r) => n + f(r), 0);
 const palletCartons = (p) => sum(p.lines, (l) => l.cartons);
 const palletKg = (p) => sum(p.lines, (l) => l.cartons * l.carton_kg);
 const kgText = (kg) => `${kg.toLocaleString("en-ZA", { maximumFractionDigits: 1 })} kg`;
-const dayText = (iso) => new Date(iso).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" });
-
-function palletsOf(c) { return Store.pallets().filter((p) => p.consignment_uuid === c.uuid).sort((a, b) => (a.scanned_at < b.scanned_at ? -1 : 1)); }
+const newestFirst = () => Store.pallets().sort((a, b) => (a.scanned_at < b.scanned_at ? 1 : -1));
 
 function renderConsignment() {
   if (cn.view !== "pallet") stopPalletScan();
-  const body = $("consignmentBody");
-  if (cn.view === "pallet") { body.innerHTML = palletForm(); return; }
-  const c = cn.view === "detail" ? Store.consignments().find((x) => x.uuid === cn.consignment) : null;
-  if (cn.view === "detail" && !c) cn.view = "list";
-  body.innerHTML = c ? detailView(c) : listView();
+  renderOperatorBar($("consignmentOperatorBar"));
+  $("consignmentOperatorBar").classList.toggle("hidden", cn.view === "pallet"); // the form needs the room
+  $("consignmentBody").innerHTML = cn.view === "pallet" ? palletForm() : palletsView();
 }
 
-function listView() {
-  const markets = Store.markets();
-  const rows = Store.consignments().map((c) => {
-    const pallets = palletsOf(c);
-    return `<button type="button" data-open="${esc(c.uuid)}" class="w-full bg-white rounded-2xl shadow p-4 text-left flex items-center justify-between gap-3 active:bg-slate-50">
-      <div><div class="font-bold">${esc(c.market_name)}</div><div class="text-sm text-slate-500">${esc(c.supplier_name ? `${c.supplier_name} · ` : "")}${esc(dayText(c.created_at))}</div></div>
-      <div class="text-right text-sm"><div class="font-semibold">${pallets.length} pallet${pallets.length === 1 ? "" : "s"}</div>
-        <div class="text-slate-500">${sum(pallets, palletCartons)} cartons · ${kgText(sum(pallets, palletKg))}</div></div>
-    </button>`;
-  }).join("");
-  return `
-    <form data-new class="bg-white rounded-2xl shadow p-4 space-y-3">
-      <div class="font-semibold">New pallet stack</div>
-      <select name="supplier" class="w-full border border-slate-300 rounded-lg p-3 text-lg">
-        ${Store.suppliers().map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}
-      </select>
-      <select name="market" class="w-full border border-slate-300 rounded-lg p-3 text-lg">
-        ${markets.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join("")}
-      </select>
-      <button class="w-full boord-btn-primary rounded-xl py-4 text-lg font-bold"${markets.length && Store.suppliers().length ? "" : " disabled"}>Start pallet stack</button>
-      ${markets.length ? "" : `<div class="text-sm text-slate-500">No markets yet - add them in Settings -> Pallet Stack.</div>`}
-      ${Store.suppliers().length ? "" : `<div class="text-sm text-slate-500">No suppliers yet - the list comes from Boord, so connect once to load it.</div>`}
-    </form>
-    ${rows || `<div class="text-center text-slate-400 text-sm py-6">No pallet stacks yet</div>`}`;
-}
+// Today's pallets (this phone's day), and any refused one whatever its day, so it is never lost.
+const sameDay = (iso) => new Date(iso).toDateString() === new Date(Store.now()).toDateString();
 
-function detailView(c) {
-  const pallets = palletsOf(c);
-  const markets = Store.markets();
-  const options = markets.some((m) => m.id === c.market_id) ? markets : [{ id: c.market_id, name: c.market_name }, ...markets];
-  const suppliers = Store.suppliers();
-  // A consignment made before suppliers existed has none: show it blank, never as the first one.
-  const supplierOptions = c.supplier_id == null ? [{ id: "", name: "Supplier..." }, ...suppliers]
-    : suppliers.some((s) => s.id === c.supplier_id) ? suppliers : [{ id: c.supplier_id, name: c.supplier_name }, ...suppliers];
+function palletsView() {
+  const pallets = newestFirst().filter((p) => sameDay(p.scanned_at) || p.error);
   const rows = pallets.map((p) => `
-    <button type="button" data-pallet="${esc(p.uuid)}" class="w-full text-left border-t py-3 flex gap-3 items-start active:bg-slate-50">
-      <div class="font-bold text-lg w-14 shrink-0">${esc(p.pallet_ref || "---")}</div>
-      <div class="flex-1 min-w-0">
-        ${p.lines.map((l, i) => `<span data-li="${i}" class="block text-sm py-1 underline decoration-dotted decoration-slate-300">${esc(l.packaging_name)} <b>${l.cartons}</b></span>`).join("")}
-        <div class="text-xs text-slate-500">${p.block_id ? `${esc(blockText(p))} · ` : ""}Date code ${esc(palletDateCode(p))}</div>
-        <div class="text-xs text-slate-400 truncate">Barcode ${esc(p.barcode)}</div>
+    <button type="button" data-pallet="${esc(p.uuid)}" class="w-full text-left border-t py-2 active:bg-slate-50">
+      <div class="flex justify-between gap-3 items-baseline">
+        <div class="font-bold text-lg">Pallet ${esc(p.pallet_ref || "---")}</div>
+        <div class="text-sm shrink-0"><b>${palletCartons(p)}</b> cartons · ${kgText(palletKg(p))}</div>
       </div>
-      <div class="text-right text-sm shrink-0"><div class="font-semibold">${palletCartons(p)}</div><div class="text-slate-500">${kgText(palletKg(p))}</div></div>
+      <div class="text-sm">${esc(palletDateCode(p))} · ${esc(p.supplier_name || "-")} · ${esc(p.market_name || "-")}</div>
+      <div class="text-xs text-slate-500 truncate">Barcode ${esc(p.barcode)}${p.scanned_by_name ? ` · ${esc(p.scanned_by_name)}` : ""}</div>
+      <ol class="list-decimal pl-6 mt-1 text-sm">
+        ${p.lines.map((l) => `<li><b>${l.cartons}</b> x ${esc(l.packaging_name)}${l.block_id ? `, ${esc(l.block_name)}${l.variety ? `, ${esc(l.variety)}` : ""}` : ""}, Litchis</li>`).join("")}
+      </ol>
+      ${p.error ? `<div class="text-sm text-red-600 mt-1">Not saved: ${esc(p.error)}. Tap to fix it.</div>` : ""}
     </button>`).join("");
   return `
-    <div class="flex items-center gap-3">
-      <button type="button" data-back class="px-3 py-2 rounded-lg border border-slate-300 bg-white"><i class="fa-solid fa-arrow-left"></i></button>
-      <div class="text-slate-500 text-sm">${esc(dayText(c.created_at))}</div>
+    <div class="bg-white rounded-2xl shadow p-4">
+      <button type="button" data-add class="w-full boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-barcode"></i> Add a new pallet</button>
     </div>
-    <div class="bg-white rounded-2xl shadow p-4 space-y-3">
-      <select data-supplier class="w-full border border-slate-300 rounded-lg p-3 text-lg font-semibold">
-        ${supplierOptions.map((s) => `<option value="${s.id}"${s.id === c.supplier_id ? " selected" : ""}>${esc(s.name)}</option>`).join("")}
-      </select>
-      <select data-market class="w-full border border-slate-300 rounded-lg p-3 text-lg font-semibold">
-        ${options.map((m) => `<option value="${m.id}"${m.id === c.market_id ? " selected" : ""}>${esc(m.name)}</option>`).join("")}
-      </select>
-      <div class="flex justify-between text-sm"><span>${pallets.length} pallet${pallets.length === 1 ? "" : "s"}</span>
-        <span><b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b></span></div>
-      <button type="button" data-add class="w-full boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-barcode"></i> Scan a pallet</button>
-    </div>
-    ${pallets.length ? `<div class="bg-white rounded-2xl shadow px-4 pb-1"><div class="text-xs text-slate-500 pt-3 pb-2">Pallet · what is on it · cartons / weight. Tap a pack to change or delete it, or the pallet to change all of it.</div>${rows}</div>` : ""}`;
+    <div class="bg-white rounded-2xl shadow px-4 pb-1">
+      <div class="flex justify-between items-baseline gap-3 pt-3">
+        <div class="font-semibold whitespace-nowrap">Pallets added today</div>
+        <div class="text-sm text-right"><b>${pallets.length}</b> pallet${pallets.length === 1 ? "" : "s"} · <b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b></div>
+      </div>
+      <div class="text-xs text-slate-500 pb-2">Tap a pallet to edit or delete it.</div>
+      ${rows || `<div class="text-center text-slate-400 text-sm py-6 border-t">No pallets yet today</div>`}
+    </div>`;
 }
 
 // ---- A pallet: scan its label, then what is on it ---------------------------
 
-function openPallet(pallet, line) {
+function openPallet(pallet) {
   cn.view = "pallet";
-  cn.focusLine = line == null ? null : line; // the pack tapped in the stack, highlighted in the form
-  cn.draft = pallet
-    ? { uuid: pallet.uuid, pallet, barcode: pallet.barcode, ref: pallet.pallet_ref || "", block_id: pallet.block_id || "", lines: pallet.lines.map((l) => ({ packaging_id: l.packaging_id, cartons: l.cartons })) }
-    : { uuid: Boord.uuid(), pallet: null, barcode: "", ref: nextRef(), block_id: "", lines: [{ packaging_id: null, cartons: "" }] };
+  // A new pallet starts with the supplier and market of the last one made.
+  const last = pallet || newestFirst()[0] || {};
+  cn.draft = {
+    uuid: pallet ? pallet.uuid : Boord.uuid(), pallet: pallet || null, barcode: pallet ? pallet.barcode : "",
+    ref: pallet ? pallet.pallet_ref || "" : nextRef(), supplier_id: last.supplier_id == null ? null : last.supplier_id,
+    market_id: last.market_id == null ? null : last.market_id,
+    lines: pallet ? pallet.lines.map((l) => ({ packaging_id: l.packaging_id, cartons: l.cartons, block_id: l.block_id || "" }))
+      : [{ packaging_id: null, cartons: "", block_id: "" }],
+  };
   renderConsignment();
   if (!pallet) startPalletScan();
 }
 
-// A draft line's pack: the active list, plus the pallet's own copy if it was
-// since retired, so editing an old pallet never loses a line.
+// The active list plus the pallet's own copy if it has since been retired
+// (or, for a supplier, dropped from Boord), so editing an old pallet loses nothing.
+function withOwn(list, own) {
+  return own && own.id != null && !list.some((r) => r.id === own.id) ? [own, ...list] : list;
+}
+const supplierChoices = (d) => withOwn(Store.suppliers(), d.pallet && { id: d.pallet.supplier_id, name: d.pallet.supplier_name });
+const marketChoices = (d) => withOwn(Store.markets(), d.pallet && { id: d.pallet.market_id, name: d.pallet.market_name });
+
 function packChoices(d) {
   const packs = Store.packaging().slice();
   for (const l of d.pallet ? d.pallet.lines : []) {
@@ -124,79 +103,92 @@ function packChoices(d) {
   return packs;
 }
 
-function draftLines(d) {
-  const packs = packChoices(d);
-  const old = d.pallet ? d.pallet.lines : [];
-  return d.lines.filter((l) => l.packaging_id != null && Number(l.cartons) >= 1).map((l) => {
-    const pack = packs.find((p) => p.id === l.packaging_id);
-    // An unchanged line keeps the weight it was saved with.
-    const prev = old.find((o) => o.packaging_id === l.packaging_id);
-    return { packaging_id: pack.id, packaging_name: pack.name, carton_kg: prev ? prev.carton_kg : pack.carton_kg, cartons: Math.round(Number(l.cartons)) };
-  });
-}
-
 // The blocks in the fruit received today and the last earlier receiving day
-// (the sulfur screen's list, Store.sources()), plus the pallet's own block if
-// it has since dropped off that list. Bought-in fruit has no block here: it is
-// the stack's supplier.
+// (the sulfur screen's list, Store.sources()), plus the pallet's own blocks
+// that have since dropped off it. Bought-in fruit has no block: it is the
+// pallet's supplier.
 function blockGroups(d) {
   const groups = Store.sources().map((g) => ({ label: g.label, blocks: g.sources.filter((s) => s.block_id != null) }))
     .filter((g) => g.blocks.length);
-  const saved = d.pallet && d.pallet.block_id;
-  if (saved && !groups.some((g) => g.blocks.some((b) => b.block_id === saved))) {
-    groups.push({ label: "Earlier", blocks: [{ block_id: saved, block_name: d.pallet.block_name, variety: d.pallet.variety }] });
-  }
+  const listed = (id) => groups.some((g) => g.blocks.some((b) => b.block_id === id));
+  const earlier = (d.pallet ? d.pallet.lines : []).filter((l) => l.block_id && !listed(l.block_id))
+    .map((l) => ({ block_id: l.block_id, block_name: l.block_name, variety: l.variety }));
+  if (earlier.length) groups.push({ label: "Earlier", blocks: earlier });
   return groups;
 }
 const blockText = (b) => `${b.block_name}${b.variety ? ` · ${b.variety}` : ""}`;
 const palletDateCode = (p) => (p && p.date_code) || dateCode(new Date(p ? p.scanned_at : nowIso()));
 
+function draftLines(d) {
+  const packs = packChoices(d);
+  const blocks = blockGroups(d).flatMap((g) => g.blocks);
+  const old = d.pallet ? d.pallet.lines : [];
+  return d.lines.filter((l) => l.packaging_id != null && Number(l.cartons) >= 1).map((l) => {
+    const pack = packs.find((p) => p.id === l.packaging_id);
+    const block = blocks.find((b) => b.block_id === l.block_id);
+    // An unchanged pack keeps the weight it was saved with.
+    const prev = old.find((o) => o.packaging_id === l.packaging_id);
+    return { packaging_id: pack.id, packaging_name: pack.name, carton_kg: prev ? prev.carton_kg : pack.carton_kg,
+             cartons: Math.round(Number(l.cartons)), block_id: block ? block.block_id : null,
+             block_name: block ? block.block_name : "", variety: block ? block.variety || "" : "" };
+  });
+}
+
+const options = (rows, picked, blank) => `<option value="">${blank}</option>`
+  + rows.map((r) => `<option value="${esc(r.id)}"${r.id === picked ? " selected" : ""}>${esc(r.name)}</option>`).join("");
+
 function palletForm() {
   const d = cn.draft;
   const packs = packChoices(d);
+  const groups = blockGroups(d);
+  const field = "border border-slate-300 rounded-lg px-2 py-2.5";
+  // One row a line: Qty, Carton type, Block, delete.
+  const cell = "min-w-0 border border-slate-300 rounded-lg px-2 py-3";
   const lines = d.lines.map((l, i) => `
-    <div class="flex gap-2 items-center rounded-lg${i === cn.focusLine ? " ring-2 ring-blue-400 p-1" : ""}" data-line="${i}">
-      <select data-field="pack" class="flex-1 min-w-0 border border-slate-300 rounded-lg p-3 text-lg">
-        <option value="">Pack...</option>
-        ${packs.map((p) => `<option value="${p.id}"${p.id === l.packaging_id ? " selected" : ""}>${esc(p.name)}</option>`).join("")}
+    <div class="flex gap-1.5 items-center" data-line="${i}">
+      <span class="w-5 shrink-0 text-center text-sm text-slate-500">${i + 1}</span>
+      <input data-field="cartons" inputmode="numeric" maxlength="4" placeholder="Qty" value="${esc(l.cartons)}" class="w-12 shrink-0 ${cell}">
+      <select data-field="pack" class="flex-1 ${cell}">${options(packs, l.packaging_id, "Carton...")}</select>
+      <select data-field="lineblock" class="flex-1 ${cell}">
+        <option value="">Block...</option>
+        ${groups.map((g) => `<optgroup label="${esc(g.label)}">${g.blocks.map((b) => `<option value="${esc(b.block_id)}"${b.block_id === l.block_id ? " selected" : ""}>${esc(blockText(b))}</option>`).join("")}</optgroup>`).join("")}
       </select>
-      <input data-field="cartons" type="number" inputmode="numeric" min="1" step="1" placeholder="Cartons" value="${esc(l.cartons)}" class="w-28 border border-slate-300 rounded-lg p-3 text-lg">
-      <button type="button" data-drop="${i}" title="Delete this pack" class="px-3 py-3 text-slate-400"><i class="fa-solid fa-trash-can"></i></button>
+      <button type="button" data-drop="${i}" title="Delete this line" class="w-8 shrink-0 py-3 text-slate-400"><i class="fa-solid fa-trash-can"></i></button>
     </div>`).join("");
   return `
     <div class="flex items-center gap-3">
       <button type="button" data-cancel class="px-3 py-2 rounded-lg border border-slate-300 bg-white"><i class="fa-solid fa-arrow-left"></i></button>
-      <div class="font-semibold">${d.pallet ? `Pallet ${esc(d.pallet.pallet_ref || "")}` : "New pallet"}</div>
+      <div class="flex-1"><div class="font-semibold">${d.pallet ? `Pallet ${esc(d.pallet.pallet_ref || "")}` : "New pallet"}</div>
+        <div id="palletTotal" class="text-sm">${totalText(draftLines(d))}</div></div>
+      <div class="font-semibold" title="Date code">${esc(palletDateCode(d.pallet))}</div>
     </div>
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
       <div id="palletReader" class="hidden w-full rounded-lg overflow-hidden bg-black min-h-[200px]"></div>
-      <label class="block"><span class="text-sm font-semibold text-slate-600">Pallet number</span>
-        <input data-field="ref" value="${esc(d.ref)}" inputmode="numeric" maxlength="3" pattern="[0-9]{3}" placeholder="001" class="w-full border border-slate-300 rounded-lg p-3 text-lg"></label>
-      <div class="text-sm font-semibold text-slate-600 -mb-2">Block</div>
-      <select data-field="block" class="w-full border border-slate-300 rounded-lg p-3 text-lg">
-        <option value="">Block...</option>
-        ${blockGroups(d).map((g) => `<optgroup label="${esc(g.label)}">${g.blocks.map((b) => `<option value="${esc(b.block_id)}"${b.block_id === d.block_id ? " selected" : ""}>${esc(blockText(b))}</option>`).join("")}</optgroup>`).join("")}
-      </select>
-      <div class="text-sm"><span class="font-semibold text-slate-600">Date code</span> <b>${esc(palletDateCode(d.pallet))}</b></div>
-      <div class="text-sm font-semibold text-slate-600 -mb-2">Barcode</div>
+      <label class="block"><span class="text-xs font-semibold text-slate-600">Barcode</span>
+        <span class="flex gap-2"><input data-field="barcode" value="${esc(d.barcode)}" inputmode="numeric" placeholder="Scan the pallet label" class="flex-1 min-w-0 ${field}">
+        <button type="button" data-scan class="px-3 rounded-lg border border-slate-300"><i class="fa-solid fa-barcode text-xl"></i></button></span></label>
       <div class="flex gap-2">
-        <input data-field="barcode" value="${esc(d.barcode)}" inputmode="numeric" placeholder="Scan the pallet label" class="flex-1 min-w-0 border border-slate-300 rounded-lg p-3 text-lg">
-        <button type="button" data-scan class="px-4 rounded-lg border border-slate-300"><i class="fa-solid fa-barcode text-xl"></i></button>
+        <label class="w-16 shrink-0"><span class="text-xs font-semibold text-slate-600">Pallet no</span>
+          <input data-field="ref" value="${esc(d.ref)}" inputmode="numeric" maxlength="3" pattern="[0-9]{3}" placeholder="001" class="w-full ${field}"></label>
+        <label class="flex-1 min-w-0"><span class="text-xs font-semibold text-slate-600">Supplier</span>
+          <select data-field="supplier" class="w-full ${field}">${options(supplierChoices(d), d.supplier_id, "Supplier...")}</select></label>
+        <label class="flex-1 min-w-0"><span class="text-xs font-semibold text-slate-600">Market</span>
+          <select data-field="market" class="w-full ${field}">${options(marketChoices(d), d.market_id, "Market...")}</select></label>
       </div>
-      <div id="palletScanMsg" class="text-sm text-red-600 empty:hidden"></div>
-      <div class="text-sm font-semibold text-slate-600">What is on it</div>
+      <div id="palletScanMsg" class="text-sm text-red-600 empty:hidden">${d.pallet && d.pallet.error ? `Not saved: ${esc(d.pallet.error)}.` : ""}</div>
+      <div class="text-sm font-semibold text-slate-600">What is on the pallet</div>
+      <div class="flex gap-1.5 text-xs text-slate-500 -mb-2"><span class="w-5 shrink-0"></span><span class="w-12 shrink-0">Qty</span><span class="flex-1">Carton type</span><span class="flex-1">Block</span><span class="w-8 shrink-0"></span></div>
       ${lines}
-      <button type="button" data-addline class="text-blue-700 font-semibold"><i class="fa-solid fa-plus"></i> Another pack</button>
-      <div id="palletTotal" class="text-sm bg-slate-50 rounded-lg p-3"></div>
+      <button type="button" data-addline class="text-blue-700 font-semibold"><i class="fa-solid fa-plus"></i> Another line</button>
       <button type="button" data-save class="w-full boord-btn-primary rounded-xl py-4 text-lg font-bold">Save pallet</button>
       ${d.pallet ? `<button type="button" data-remove class="w-full border border-red-300 text-red-700 rounded-xl py-3 font-semibold">Delete pallet</button>` : ""}
     </div>`;
 }
 
+const totalText = (lines) => `<b>${sum(lines, (l) => l.cartons)}</b> cartons · <b>${kgText(sum(lines, (l) => l.cartons * l.carton_kg))}</b>`;
 function updatePalletTotal() {
-  const lines = draftLines(cn.draft);
   const el = $("palletTotal");
-  if (el) el.innerHTML = `<b>${sum(lines, (l) => l.cartons)}</b> cartons · <b>${kgText(sum(lines, (l) => l.cartons * l.carton_kg))}</b>`;
+  if (el) el.innerHTML = totalText(draftLines(cn.draft));
 }
 
 // A browser only hands out the camera on https (or localhost): on the farm
@@ -245,72 +237,76 @@ function onPalletCode(text) {
   $("palletScanMsg").textContent = "";
 }
 
+// The stack a new pallet goes on: the newest, or a new one the first time.
+async function currentStack() {
+  const newest = Store.consignments()[0];
+  if (newest) return newest.uuid;
+  const uuid = Boord.uuid();
+  await Store.saveRun({ kind: "consignment", uuid, created_at: nowIso(), rev: Date.now() });
+  return uuid;
+}
+
 async function savePallet() {
   const d = cn.draft;
   const lines = draftLines(d);
   const barcode = d.barcode.trim();
+  const supplier = supplierChoices(d).find((s) => s.id === d.supplier_id);
+  const market = marketChoices(d).find((m) => m.id === d.market_id);
   const fail = (m) => { $("palletScanMsg").textContent = m; };
   if (!/^\d{3}$/.test(d.ref)) return fail("The pallet number is 3 digits, like 001.");
+  if (!supplier) return fail("Pick the supplier.");
+  if (!market) return fail("Pick the market.");
   if (!barcode) return fail("Scan the pallet label first.");
   const twin = seasonPallets(d.pallet ? seasonOf(d.pallet.scanned_at) : seasonOf(nowIso())).find((p) => p.pallet_ref === d.ref && p.uuid !== d.uuid);
   if (twin) return fail(`Pallet ${d.ref} is already used this season.`);
-  if (!lines.length) return fail("Pick a pack and the number of cartons.");
+  if (!lines.length) return fail("Pick a carton type and the number of cartons.");
   // A line with only one of the two is a slip, not a blank line to skip.
-  if (d.lines.some((l) => (l.packaging_id != null) !== (Number(l.cartons) >= 1))) return fail("Every line needs a pack and a number of cartons.");
+  if (d.lines.some((l) => (l.packaging_id != null) !== (Number(l.cartons) >= 1))) return fail("Every line needs a carton type and a number of cartons.");
   const other = palletWithCode(barcode, d.uuid);
   if (other) return fail(`That label is already on pallet ${other.pallet_ref}.`);
   stopPalletScan();
-  const block = blockGroups(d).flatMap((g) => g.blocks).find((b) => b.block_id === d.block_id);
-  await Store.saveRun({ ...(d.pallet || { kind: "pallet", consignment_uuid: cn.consignment, scanned_at: nowIso() }),
-                        kind: "pallet", uuid: d.uuid, barcode, lines, pallet_ref: d.ref, block_id: block ? block.block_id : null, block_name: block ? block.block_name : "",
-                        variety: block ? block.variety : "", date_code: palletDateCode(d.pallet), removed: false, rev: Date.now() });
-  cn.view = "detail";
+  const op = Operator.current() || {};
+  const base = d.pallet || { kind: "pallet", consignment_uuid: await currentStack(), scanned_at: nowIso(),
+                             scanned_by: op.id || "", scanned_by_name: op.name || "" };
+  await Store.saveRun({ ...base, kind: "pallet", uuid: d.uuid, barcode, lines, pallet_ref: d.ref,
+                        changed_by: op.id || "", changed_by_name: op.name || "",
+                        supplier_id: supplier.id, supplier_name: supplier.name, market_id: market.id, market_name: market.name,
+                        date_code: palletDateCode(d.pallet), removed: false, rev: Date.now() });
+  cn.view = "list";
   renderConsignment();
 }
 
 async function removePallet() {
   const d = cn.draft;
   if (!confirm("Delete this pallet?")) return;
-  await Store.saveRun({ ...d.pallet, kind: "pallet", removed: true, rev: Date.now() });
-  cn.view = "detail";
+  const op = Operator.current() || {};
+  await Store.saveRun({ ...d.pallet, kind: "pallet", removed: true, changed_by: op.id || "", changed_by_name: op.name || "", rev: Date.now() });
+  cn.view = "list";
   renderConsignment();
-}
-
-async function startConsignment(ev) {
-  ev.preventDefault();
-  const f = new FormData(ev.target);
-  const market = Store.markets().find((m) => m.id === Number(f.get("market")));
-  const supplier = Store.suppliers().find((s) => s.id === Number(f.get("supplier")));
-  if (!market || !supplier) return;
-  const uuid = Boord.uuid();
-  await Store.saveRun({ kind: "consignment", uuid, market_id: market.id, market_name: market.name,
-                        supplier_id: supplier.id, supplier_name: supplier.name, created_at: nowIso(), rev: Date.now() });
-  cn = { view: "detail", consignment: uuid, draft: null };
-  renderConsignment();
-}
-
-async function changeConsignment(c, change) {
-  await Store.saveRun({ ...c, ...change, kind: "consignment", rev: Date.now() });
 }
 
 function onConsignmentClick(ev) {
   const t = ev.target.closest("button");
   if (!t) return;
-  const li = ev.target.closest("[data-li]");
-  if (li && t.dataset.pallet) { openPallet(Store.pallets().find((p) => p.uuid === t.dataset.pallet), Number(li.dataset.li)); return; }
+  Operator.touch(); // working here keeps the operator signed in
   const d = cn.draft;
   const sync = () => { cn.draft.lines = cn.draft.lines.slice(); renderConsignment(); };
-  if (t.dataset.open) { cn = { view: "detail", consignment: t.dataset.open, draft: null }; renderConsignment(); }
-  else if (t.dataset.pallet) openPallet(Store.pallets().find((p) => p.uuid === t.dataset.pallet));
-  else if ("back" in t.dataset) { cn = { view: "list", consignment: null, draft: null }; renderConsignment(); }
+  if (t.dataset.pallet) openPallet(Store.pallets().find((p) => p.uuid === t.dataset.pallet));
   else if ("add" in t.dataset) openPallet(null);
-  else if ("cancel" in t.dataset) { cn.view = "detail"; renderConsignment(); }
+  else if ("cancel" in t.dataset) { cn.view = "list"; renderConsignment(); }
   else if ("scan" in t.dataset) startPalletScan();
-  else if ("addline" in t.dataset) { d.lines.push({ packaging_id: null, cartons: "" }); sync(); }
+  else if ("addline" in t.dataset) {
+    // A new line starts on the block of the one above: usually the same fruit.
+    d.lines.push({ packaging_id: null, cartons: "", block_id: d.lines.length ? d.lines[d.lines.length - 1].block_id : "" });
+    sync();
+  }
   else if (t.dataset.drop) {
-    d.lines.splice(Number(t.dataset.drop), 1);
-    if (!d.lines.length) d.lines.push({ packaging_id: null, cartons: "" }); // a pallet is deleted with its own button
-    cn.focusLine = null;
+    const i = Number(t.dataset.drop);
+    const l = d.lines[i];
+    // Ask first, unless nothing was entered (a new line's block is only copied from the line above).
+    if ((l.packaging_id != null || l.cartons !== "") && !confirm(`Delete line ${i + 1}?`)) return;
+    d.lines.splice(i, 1);
+    if (!d.lines.length) d.lines.push({ packaging_id: null, cartons: "", block_id: "" }); // a pallet is deleted with its own button
     sync();
   }
   else if ("save" in t.dataset) savePallet();
@@ -319,47 +315,50 @@ function onConsignmentClick(ev) {
 
 function onConsignmentInput(ev) {
   const f = ev.target.dataset.field;
-  if (f === "barcode") { cn.draft.barcode = ev.target.value; return; }
-  if (f === "block") { cn.draft.block_id = ev.target.value; return; }
-  if (f === "ref") { cn.draft.ref = ev.target.value.replace(/\D/g, "").slice(0, 3); ev.target.value = cn.draft.ref; return; }
-  if (f) {
-    const line = cn.draft.lines[Number(ev.target.closest("[data-line]").dataset.line)];
-    if (f === "pack") line.packaging_id = ev.target.value ? Number(ev.target.value) : null;
-    else line.cartons = ev.target.value;
-    updatePalletTotal();
-  } else if (ev.type === "change" && ev.target.matches("[data-market], [data-supplier]")) {
-    const c = Store.consignments().find((x) => x.uuid === cn.consignment);
-    const isMarket = ev.target.matches("[data-market]");
-    const picked = (isMarket ? Store.markets() : Store.suppliers()).find((r) => r.id === Number(ev.target.value));
-    if (c && picked) changeConsignment(c, isMarket ? { market_id: picked.id, market_name: picked.name } : { supplier_id: picked.id, supplier_name: picked.name });
-  }
+  const v = ev.target.value;
+  if (!f) return;
+  Operator.touch();
+  if (f === "barcode") { cn.draft.barcode = v; return; }
+  if (f === "ref") { cn.draft.ref = v.replace(/\D/g, "").slice(0, 3); ev.target.value = cn.draft.ref; return; }
+  if (f === "supplier" || f === "market") { cn.draft[`${f}_id`] = v ? Number(v) : null; return; }
+  const line = cn.draft.lines[Number(ev.target.closest("[data-line]").dataset.line)];
+  if (f === "pack") line.packaging_id = v ? Number(v) : null;
+  else if (f === "lineblock") line.block_id = v;
+  // A text box, not type=number: its spinner hid the digits in a box this narrow.
+  else { line.cartons = v.replace(/\D/g, ""); ev.target.value = line.cartons; }
+  updatePalletTotal();
 }
 
 // ---- Settings -> Consignment ------------------------------------------------
 
+// One compact row a carton or market: name, (kg), In use, delete, save. The
+// column names are said once, above the rows.
 function settingsRow(kind, row) {
   const isNew = row.id == null;
+  const box = "border border-slate-300 rounded-lg px-2 py-2";
   return `
-    <form class="bg-white rounded-2xl shadow p-4 space-y-3" data-cn-form="${kind}" data-id="${isNew ? "new" : row.id}">
-      <div class="flex items-center gap-2">
-        <input name="name" value="${esc(row.name)}" placeholder="${kind === "packaging" ? "Pack, e.g. 1kg XXL" : "Market"}" class="flex-1 min-w-0 border border-slate-300 rounded-lg p-2 text-lg font-semibold">
-        ${kind === "packaging" ? `<label class="block w-28 shrink-0"><span class="text-xs text-slate-500">Carton kg</span>
-          <input name="carton_kg" type="number" step="any" inputmode="decimal" value="${esc(row.carton_kg)}" class="w-full border border-slate-300 rounded-lg p-2"></label>` : ""}
-      </div>
-      <div class="flex items-center justify-between gap-3">
-        ${isNew ? "<span></span>" : `<label class="text-sm flex items-center gap-2"><input name="active" type="checkbox"${row.active ? " checked" : ""} class="w-5 h-5"> In use</label>`}
-        <button class="px-5 ${isNew ? "boord-btn-primary" : "border border-slate-300"} rounded-lg py-2 font-semibold">${isNew ? "Add" : "Save"}</button>
-      </div>
+    <form class="flex items-center gap-1.5 py-2" data-cn-form="${kind}" data-id="${isNew ? "new" : row.id}">
+      <input name="name" value="${esc(row.name)}" placeholder="${isNew ? (kind === "packaging" ? "New carton" : "New market") : ""}" class="flex-1 min-w-0 font-semibold ${box}">
+      ${kind === "packaging" ? `<input name="carton_kg" type="number" step="any" inputmode="decimal" value="${esc(row.carton_kg)}" placeholder="kg" class="w-14 shrink-0 ${box}">` : ""}
+      ${isNew ? `<span class="w-10 shrink-0"></span><span class="w-10 shrink-0"></span>`
+        : `<label class="w-10 shrink-0 flex justify-center" title="In use"><input name="active" type="checkbox"${row.active ? " checked" : ""} class="w-5 h-5"></label>
+           <button type="button" data-cn-delete title="Delete" class="w-10 h-10 shrink-0 rounded-lg border border-red-300 text-red-700"><i class="fa-solid fa-trash-can"></i></button>`}
+      <button class="w-14 shrink-0 h-10 ${isNew ? "boord-btn-primary" : "border border-slate-300"} rounded-lg font-semibold">${isNew ? "Add" : "Save"}</button>
     </form>`;
+}
+
+function settingsCard(kind, rows) {
+  const head = `<div class="flex gap-1.5 pt-3 text-xs text-slate-500"><span class="flex-1">${kind === "packaging" ? "Carton" : "Market"}</span>`
+    + `${kind === "packaging" ? `<span class="w-14 shrink-0">kg</span>` : ""}<span class="w-10 shrink-0 text-center">In use</span><span class="w-10 shrink-0"></span><span class="w-14 shrink-0"></span></div>`;
+  return `<div class="bg-white rounded-2xl shadow px-3 pb-1 divide-y divide-slate-100">${head}`
+    + rows.map((r) => settingsRow(kind, r)).join("") + settingsRow(kind, { id: null, name: "", carton_kg: "" }) + `</div>`;
 }
 
 async function loadConsignmentSettings() {
   try {
     const [packs, markets] = await Promise.all([Boord.api("/api/settings/packaging"), Boord.api("/api/settings/markets")]);
-    $("packagingSettings").innerHTML = packs.map((p) => settingsRow("packaging", p)).join("")
-      + `<div class="text-sm font-semibold text-slate-600 pt-2">Add a pack</div>` + settingsRow("packaging", { id: null, name: "", carton_kg: "" });
-    $("marketSettings").innerHTML = markets.map((m) => settingsRow("markets", m)).join("")
-      + `<div class="text-sm font-semibold text-slate-600 pt-2">Add a market</div>` + settingsRow("markets", { id: null, name: "" });
+    $("packagingSettings").innerHTML = settingsCard("packaging", packs);
+    $("marketSettings").innerHTML = settingsCard("markets", markets);
   } catch (e) {
     if (e.status === 401) { unlocked = false; show(); }
     else $("packagingSettings").innerHTML = $("marketSettings").innerHTML = `<div class="text-sm text-slate-500">These can only be changed while the server can be reached.</div>`;
@@ -386,13 +385,32 @@ async function saveConsignmentSetting(ev) {
   }
 }
 
+async function deleteConsignmentSetting(ev) {
+  const btn = ev.target.closest("[data-cn-delete]");
+  if (!btn) return;
+  const form = btn.closest("[data-cn-form]");
+  const name = new FormData(form).get("name");
+  if (!confirm(`Delete ${name}?`)) return;
+  try {
+    await Boord.api(`/api/settings/${form.dataset.cnForm}/${form.dataset.id}`, { method: "DELETE" });
+    Boord.toast("Deleted");
+    await loadConsignmentSettings();
+    Store.syncNow();
+  } catch (e) {
+    if (e.status === 401) { unlocked = false; show(); return; }
+    Boord.toast(Boord.errorDetail(e, "No connection to the server"));
+  }
+}
+
 function initConsignment() {
   const body = $("consignmentBody");
   body.addEventListener("click", onConsignmentClick);
   body.addEventListener("input", onConsignmentInput);
   body.addEventListener("change", onConsignmentInput);
-  body.addEventListener("submit", (ev) => { if (ev.target.matches("[data-new]")) startConsignment(ev); });
   $("consignmentSettings").addEventListener("submit", saveConsignmentSetting);
+  $("consignmentSettings").addEventListener("click", deleteConsignmentSetting);
   // A sync landing while a pallet is being filled in must not wipe the form.
-  Store.onChange(() => { if (!$("consignment").classList.contains("hidden") && cn.view !== "pallet") renderConsignment(); });
+  Store.onChange(() => { if (!$("palletstack").classList.contains("hidden") && cn.view !== "pallet") renderConsignment(); });
+  // The operator went idle while this screen was open: back to the badge.
+  setInterval(() => { if (!$("palletstack").classList.contains("hidden") && !Operator.current()) show(); }, 30000);
 }
