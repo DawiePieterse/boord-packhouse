@@ -319,7 +319,6 @@ async function removePallet() {
 function onConsignmentClick(ev) {
   const t = ev.target.closest("button");
   if (!t) return;
-  Operator.touch(); // working here keeps the operator signed in
   const d = cn.draft;
   const sync = () => { cn.draft.lines = cn.draft.lines.slice(); renderConsignment(); };
   if (t.dataset.pallet) openPallet(Store.pallets().find((p) => p.uuid === t.dataset.pallet));
@@ -349,7 +348,6 @@ function onConsignmentInput(ev) {
   const f = ev.target.dataset.field;
   const v = ev.target.value;
   if (!f) return;
-  Operator.touch();
   if (f === "barcode") { cn.draft.barcode = v; return; }
   if (f === "ref") { cn.draft.ref = v.replace(/\D/g, "").slice(0, 3); ev.target.value = cn.draft.ref; return; }
   if (f === "supplier" || f === "market") { cn.draft[`${f}_id`] = v ? Number(v) : null; return; }

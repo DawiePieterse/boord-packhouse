@@ -248,7 +248,6 @@ async function shareNote() {
 function onDeliveryClick(ev) {
   const t = ev.target.closest("button");
   if (!t) return;
-  Operator.touch();
   const d = dn.draft;
   if (t.dataset.note) openNote(Store.notes().find((n) => n.uuid === t.dataset.note));
   else if ("addnote" in t.dataset) openNote(null);
@@ -269,7 +268,6 @@ function onDeliveryClick(ev) {
 function onDeliveryInput(ev) {
   const f = ev.target.dataset.field;
   if (!f) return;
-  Operator.touch();
   const v = ev.target.value;
   if (f === "receiver" || f === "transporter") dn.draft[`${f}_id`] = v ? Number(v) : null;
   else if (f === "no") { dn.draft.no = v.replace(/\D/g, ""); ev.target.value = dn.draft.no; }

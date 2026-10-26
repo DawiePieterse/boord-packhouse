@@ -175,6 +175,10 @@ function renderSettingsNav() {
       + `${esc(p.name)}</a>`).join("");
 }
 
+// Roles that open with a badge scan.
+const BADGED = ["sulfur", "acid", "palletstack", "deliverynote"];
+const onBadgedScreen = () => BADGED.some((id) => location.hash === `#${id}`);
+
 // --------------------------------------------------------------------------
 // Which screen. The hash decides: "" home, #<module>, #settings[/<page>].
 // --------------------------------------------------------------------------
@@ -183,11 +187,11 @@ function show() {
   const inSettings = hash === "#settings" || hash.startsWith("#settings/");
   if (!inSettings) lockSettings();
   const m = MODULES.find((x) => `#${x.id}` === hash);
-  // Roles that open with a badge scan. Off their screens the operator stays
-  // signed in for a 10-minute grace period (Operator.leave), so popping out
-  // to Home needs no rescan.
-  const BADGED = ["sulfur", "acid", "palletstack", "deliverynote"];
-  if (!BADGED.some((id) => hash === `#${id}`)) Operator.leave();
+  // Off a badge-scanned screen the operator stays signed in for a 10-minute
+  // grace period (Operator.leave), so popping out to Home needs no rescan;
+  // coming back counts as working again.
+  if (!onBadgedScreen()) Operator.leave();
+  else Operator.touch();
   const badged = m && BADGED.includes(m.id);
   const view = inSettings ? (unlocked ? "settings" : "pin")
     : badged ? (Operator.current() ? m.id : "scan")
@@ -267,6 +271,11 @@ Boord.boot(() => {
   $("settings").addEventListener("pointerdown", touchSettings);
   $("settings").addEventListener("input", touchSettings);
   window.addEventListener("hashchange", show);
+  // Any tap, key or scroll on a badge-scanned screen is working there: it
+  // keeps the operator signed in, not only the buttons each screen handles.
+  for (const type of ["pointerdown", "keydown", "scroll"]) {
+    document.addEventListener(type, () => { if (onBadgedScreen()) Operator.touch(); }, { capture: true, passive: true });
+  }
   show();
   Store.start();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("service-worker.js").catch(() => {});

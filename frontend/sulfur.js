@@ -9,10 +9,10 @@
 
 // --------------------------------------------------------------------------
 // Operator: who is working, from their Boord badge. Stamped on every run
-// they start or end. Signed out after OPERATOR_IDLE_MS untouched on the
-// sulfur screen, or OPERATOR_GRACE_MS after leaving it for Home - a quick
-// look at the home screen must not mean scanning the badge again. "Not
-// you?" signs out at once.
+// they start or end. Signed out after OPERATOR_IDLE_MS with no tap, key or
+// scroll on a badge-scanned screen (app.js counts them, and opening one), or
+// OPERATOR_GRACE_MS after leaving it for Home - a quick look at the home
+// screen must not mean scanning the badge again. "Not you?" signs out at once.
 // --------------------------------------------------------------------------
 const OPERATOR_IDLE_MS = 15 * 60 * 1000;
 const OPERATOR_GRACE_MS = 10 * 60 * 1000;
@@ -28,7 +28,14 @@ const Operator = {
   set(worker, ms = OPERATOR_IDLE_MS) {
     localStorage.setItem("ph_operator", JSON.stringify({ worker, until: Date.now() + ms }));
   },
-  touch() { const w = this.current(); if (w) this.set(w); },
+  // Still working: the full idle time again. Called on every tap and scroll,
+  // so it writes at most every few seconds.
+  touch() {
+    try {
+      const o = JSON.parse(localStorage.getItem("ph_operator"));
+      if (o && Date.now() < o.until && o.until - Date.now() < OPERATOR_IDLE_MS - 5000) this.set(o.worker);
+    } catch (_) { /* none */ }
+  },
   // Left for Home: still signed in for the grace period, never longer.
   leave() {
     try {
@@ -416,7 +423,6 @@ async function endRun(uuid) {
 }
 
 function onSulfurInput(ev) {
-  Operator.touch();
   const card = ev.target.closest("[data-tent]");
   const field = ev.target.dataset.field;
   const tent = card && Store.tents().find((t) => t.id === Number(card.dataset.tent));
@@ -434,7 +440,6 @@ function onSulfurInput(ev) {
 }
 
 function onSulfurClick(ev) {
-  Operator.touch();
   const card = ev.target.closest("[data-tent]");
   const step = ev.target.closest("[data-step]");
   const size = ev.target.closest("[data-size]");
