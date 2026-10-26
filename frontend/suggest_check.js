@@ -1,7 +1,7 @@
 // Self-check for suggest.js:  node frontend/suggest_check.js
 // Also run by backend/tests/test_suggest.py.
 const assert = require("assert");
-const { suggestMinutes, describeSuggestion, estimateResidue } = require("./suggest.js");
+const { suggestMinutes, describeSuggestion, estimateResidue, batchNo, dateCode } = require("./suggest.js");
 
 const settings = {
   ref_grams: 425, ref_crates: 24, ref_crate_kg: 20, ref_temp: 25, ref_humidity: 60,
@@ -62,3 +62,15 @@ r = suggestMinutes({ ...load, grams: 850 }, settings);
 assert.strictEqual(estimateResidue(60, r, settings).ppm, 10);
 
 console.log("suggest.js: all checks passed");
+
+// Date code: week's last digit, weekday, 0, week's first digit.
+assert.strictEqual(dateCode(new Date(2026, 9, 26)), "4104");   // Monday, week 44
+assert.strictEqual(dateCode(new Date(2026, 10, 2)), "5104");   // Monday, week 45
+assert.strictEqual(dateCode(new Date(2026, 10, 8)), "5704");   // Sunday, week 45
+assert.strictEqual(dateCode(new Date(2026, 11, 28)), "3105");  // Monday, week 53 (2026 has one)
+assert.strictEqual(dateCode(new Date(2027, 0, 4)), "1100");    // Monday, week 1
+// Batch numbers: tent, date code, local time, blocks, two characters of the uuid.
+const at = new Date(2026, 9, 26, 10, 7);
+assert.strictEqual(batchNo(2, at, [{ block_id: "15" }], "k7ab-1"), "T2-4104-1007-B15-K7");
+assert.strictEqual(batchNo(2, at, [{ block_id: "12" }, { block_id: "14" }], "0a"), "T2-4104-1007-B12/14-0A");
+assert.strictEqual(batchNo(1, at, [{ block_id: "8a" }, { supplier_id: 2 }], "zz"), "T1-4104-1007-B8a/S2-ZZ");

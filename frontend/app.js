@@ -156,7 +156,7 @@ async function runBackupNow() {
 // --------------------------------------------------------------------------
 const SETTINGS_PAGES = [
   { id: "packhouse", name: "Packhouse", icon: "fa-sliders" },
-  { id: "sulfur",    name: "Sulfur",    icon: "fa-tent",       load: () => { loadTentSettings(); loadSulfurSettings(); } },
+  { id: "sulfur",    name: "Sulfur",    icon: "fa-tent",       load: () => { loadTentSettings(); loadSulfurSettings(); loadSulfurReport(); } },
   { id: "acid",      name: "Acid",      icon: "fa-flask",      load: loadBathSettings },
   { id: "setup",     name: "Setup",     icon: "fa-screwdriver-wrench", load: loadBackupsList },
 ];

@@ -68,6 +68,16 @@ class SulfurRun(SQLModel, table=True):
     # The aril SO2 estimate shown when the run started (frontend/suggest.js),
     # for comparing with lab results later. An estimate, never a measurement.
     estimated_ppm: Optional[float] = None
+    # Traceability. batch_no is made on the tablet when the run starts
+    # (batchNo in frontend/suggest.js): tent, farm-local date and time, the
+    # fruit's blocks and two characters of the uuid. size is copied from
+    # Settings -> Sulfur's list, so it still reads right after a size is removed.
+    # block_id / supplier_id above are the first source; any more (a load of
+    # two blocks) are a JSON list of {block_id, block_name, variety,
+    # supplier_id, supplier_name} in more_sources.
+    batch_no: str = ""
+    size: str = ""
+    more_sources: str = ""
 
 
 class SulfurSettings(SQLModel, table=True):
@@ -109,6 +119,7 @@ class SulfurSettings(SQLModel, table=True):
     residue_calibrated: bool = False
     residue_limit_ppm: float = 10.0   # EU limit for SO2 in the aril
     residue_warn_ppm: float = 8.0
+    sizes: str = '["L", "XL", "XXL", "Mixed"]'  # JSON list: the fruit sizes the operator picks from
 
 
 class Bath(SQLModel, table=True):
