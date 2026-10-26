@@ -27,11 +27,11 @@ function dayAfter(v) {
   return d.toLocaleDateString("en-CA");
 }
 // The number is typed on the first note (carrying on from the paper book), and
-// every new note after it offers the highest so far + 1: this phone's notes,
-// or the highest the server has ever had.
+// every new note after it offers the last note number + 1: the server's (set
+// in Settings, or the highest it has had), or a note this phone has not sent yet.
 function nextNoteNo() {
-  const used = [...Store.notes().map((n) => n.note_no), Store.noteOptions().last_no || 0];
-  const last = Math.max(...used);
+  const unsent = Store.notes().filter((n) => n.synced === 0).map((n) => n.note_no);
+  const last = Math.max(Store.noteOptions().last_no || 0, ...unsent);
   return last ? String(last + 1) : "";
 }
 const receiverText = (r) => [r.name, r.market, r.city].filter(Boolean).join("\n");
@@ -324,6 +324,7 @@ async function loadDeliverySettings() {
     $("transporterSettings").innerHTML = dnSettingsCard("transporters", transporters);
     $("receiverSettings").innerHTML = dnSettingsCard("receivers", receivers);
     $("dnCooledTo").value = opts.cooled_to;
+    $("dnLastNo").value = opts.last_no || "";
   } catch (e) {
     if (e.status === 401) { unlocked = false; show(); }
     else $("transporterSettings").innerHTML = $("receiverSettings").innerHTML = `<div class="text-sm text-slate-500">These can only be changed while the server can be reached.</div>`;
@@ -345,7 +346,9 @@ async function dnSettingsCall(path, opts, done) {
 function saveDeliverySetting(ev) {
   ev.preventDefault();
   if (ev.target.id === "dnSettingsForm") {
-    dnSettingsCall("/api/settings/deliverynote", { method: "PUT", body: { cooled_to: Number($("dnCooledTo").value) } }, "Saved");
+    const last = $("dnLastNo").value.trim();
+    dnSettingsCall("/api/settings/deliverynote", { method: "PUT", body: { cooled_to: Number($("dnCooledTo").value),
+                                                                          last_no: last ? Number(last) : null } }, "Saved");
     return;
   }
   const form = ev.target.closest("[data-dn-form]");

@@ -288,6 +288,8 @@ class DeliveryNoteSettings(SQLModel, table=True):
     """Settings -> Delivery Note's numbers. One row."""
     id: Optional[int] = Field(default=None, primary_key=True)
     cooled_to: float = 8.0      # a new note's "Verkoel op", °C
+    last_no: Optional[int] = None   # the last note number; a new note offers it + 1. Moves up by
+                                    # itself as notes arrive, and Settings can set it (down too)
 
 
 class DeliveryNote(SQLModel, table=True):

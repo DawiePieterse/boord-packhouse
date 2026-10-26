@@ -137,6 +137,11 @@ def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
             row.receiver, row.transporter, row.seal_no, row.cooled_to = rec.receiver, rec.transporter, rec.seal_no, rec.cooled_to
             row.loaded_on, row.offloaded_on = rec.loaded_on, rec.offloaded_on
         session.add(row)
+        if not rec.removed:  # the last note number moves on past this one
+            settings = session.get(DeliveryNoteSettings, 1)
+            if settings is not None and (settings.last_no or 0) < rec.note_no:
+                settings.last_no = rec.note_no
+                session.add(settings)
         session.flush()  # the next note in this pass sees this one's number
         synced.append(rec.uuid)
     session.commit()
@@ -157,14 +162,15 @@ def state(session: Session = Depends(get_packhouse_session)):
 def options(session: Session = Depends(get_packhouse_session)):
     """What a new note picks from (Settings -> Delivery Note): the transporters
     and receivers in use, the cooled-to temperature it starts with, and the
-    highest note number ever used (the phones only hold 90 days of notes), so
-    the next one follows on after a quiet spell too."""
+    last note number (Settings', else the highest ever used: the phones only
+    hold 90 days of notes), so the next one follows on after a quiet spell too."""
     def active(model):
         return session.exec(select(model).where(model.active == True).order_by(model.sort, model.id)).all()  # noqa: E712
     settings = session.get(DeliveryNoteSettings, 1)
     return {"transporters": active(Transporter), "receivers": active(Receiver),
             "cooled_to": settings.cooled_to if settings else 8.0,
-            "last_no": session.exec(select(func.max(DeliveryNote.note_no))).one()}
+            "last_no": (settings.last_no if settings and settings.last_no
+                        else session.exec(select(func.max(DeliveryNote.note_no))).one())}
 
 
 # The printed parts of the paper note.

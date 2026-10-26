@@ -106,7 +106,8 @@ def client():
             for r in s.exec(select(Transporter)).all() + s.exec(select(Receiver)).all():
                 r.active = True
                 s.add(r)
-            s.get(DeliveryNoteSettings, 1).cooled_to = 8.0
+            settings = s.get(DeliveryNoteSettings, 1)
+            settings.cooled_to, settings.last_no = 8.0, None
             s.commit()
         if os.path.exists(admin_auth.PIN_FILE):
             os.remove(admin_auth.PIN_FILE)

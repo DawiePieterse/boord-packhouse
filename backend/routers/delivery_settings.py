@@ -5,6 +5,8 @@ The packs' rules (consignment_settings.py): a retired one (active = false)
 leaves the screen, notes keep what they copied, and delete is only for one no
 live note uses.
 """
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, SQLModel, select
 
@@ -30,6 +32,7 @@ class ReceiverIn(SQLModel):
 
 class DeliverySettingsIn(SQLModel):
     cooled_to: float
+    last_no: Optional[int] = None
 
 
 def _delete(session: Session, model, column, row_id: int):
@@ -89,8 +92,10 @@ def delete_receiver(row_id: int, session: Session = Depends(get_packhouse_sessio
 def save_delivery_settings(body: DeliverySettingsIn, session: Session = Depends(get_packhouse_session)):
     if not -5 <= body.cooled_to <= 30:
         raise HTTPException(422, "The temperature must be between -5 and 30 °C")
+    if body.last_no is not None and body.last_no < 1:
+        raise HTTPException(422, "The last note number is a whole number from 1")
     row = session.get(DeliveryNoteSettings, 1) or DeliveryNoteSettings(id=1)
-    row.cooled_to = body.cooled_to
+    row.cooled_to, row.last_no = body.cooled_to, body.last_no
     session.add(row)
     session.commit()
     session.refresh(row)

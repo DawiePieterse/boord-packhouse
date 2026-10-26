@@ -59,6 +59,7 @@ def upgrade() -> None:
     settings = op.create_table('deliverynotesettings',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('cooled_to', sa.Float(), nullable=False),
+    sa.Column('last_no', sa.Integer(), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     # ### end Alembic commands ###
@@ -67,7 +68,7 @@ def upgrade() -> None:
     op.bulk_insert(receiver, [
         {"name": "Laughing Waters Lietsjies", "market": "", "city": "", "sort": 0, "active": True},
         {"name": "Boeretrust", "market": "Tshwane Mark", "city": "Pretoria", "sort": 1, "active": True}])
-    op.bulk_insert(settings, [{"id": 1, "cooled_to": 8.0}])
+    op.bulk_insert(settings, [{"id": 1, "cooled_to": 8.0, "last_no": None}])
 
 
 def downgrade() -> None:

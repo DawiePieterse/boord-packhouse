@@ -103,6 +103,17 @@ def test_delete_only_what_no_live_note_uses(client, admin_client, pallets):
     assert admin_client.delete("/api/settings/receivers/2").status_code == 200
 
 
-def test_last_number_is_the_highest_ever_used(client, pallets):
-    sync(client, note(), note("n2", 1400, pallets=("p2",), removed=True))
-    assert client.get("/api/deliverynote/options").json()["last_no"] == 1400
+def test_last_number_follows_notes_and_settings_can_change_it(client, admin_client, pallets):
+    last = lambda: client.get("/api/deliverynote/options").json()["last_no"]  # noqa: E731
+    sync(client, note())
+    assert last() == 1335
+    # Mistyped 13350 then corrected: Settings sets it back, a lower note never pulls it down.
+    assert admin_client.put("/api/settings/deliverynote", json={"cooled_to": 8, "last_no": 1340}).status_code == 200
+    assert last() == 1340
+    sync(client, note("n2", 1336, pallets=("p2",)))
+    assert last() == 1340
+    sync(client, note("n2", 1341, pallets=("p2",)))
+    assert last() == 1341
+    assert admin_client.put("/api/settings/deliverynote", json={"cooled_to": 8, "last_no": 0}).status_code == 422
+    admin_client.put("/api/settings/deliverynote", json={"cooled_to": 8, "last_no": None})
+    assert last() == 1341  # cleared: the highest note ever used
