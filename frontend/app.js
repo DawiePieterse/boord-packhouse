@@ -17,7 +17,7 @@ const PALLET_BOXES = `<svg viewBox="0 0 64 64" class="w-[1.15em] h-[1em] inline-
 const MODULES = [
   { id: "sulfur",   name: "Sulfur tent",         icon: "fa-tent",                     blurb: "Load a run, dose, countdown and overrun alarm.", built: true },
   { id: "acid",     name: "Acid bath",           icon: "fa-flask",                    blurb: "Batches, dip and drying timers, chemical changes.", built: true },
-  { id: "consignment", name: "Pallet Stack",   icon: "",                  iconHtml: PALLET_BOXES, blurb: "Pallets and cartons grouped into a pallet stack.", built: true },
+  { id: "palletstack", name: "Pallet Stack",   icon: "",                  iconHtml: PALLET_BOXES, blurb: "Pallets and cartons grouped into a pallet stack.", built: true },
   { id: "deliverynote", name: "Delivery Note",   icon: "fa-file-lines",               blurb: "Delivery note for a load leaving the farm." },
 ];
 
@@ -155,10 +155,9 @@ async function runBackupNow() {
 // runs each time the page opens.
 // --------------------------------------------------------------------------
 const SETTINGS_PAGES = [
-  { id: "packhouse", name: "Packhouse", icon: "fa-sliders" },
   { id: "sulfur",    name: "Sulfur",    icon: "fa-tent",       load: () => { loadTentSettings(); loadSulfurSettings(); loadSulfurReport(); } },
   { id: "acid",      name: "Acid",      icon: "fa-flask",      load: loadBathSettings },
-  { id: "consignment", name: "Pallet Stack", icon: "fa-pallet",   load: loadConsignmentSettings },
+  { id: "palletstack", name: "Pallet Stack", icon: "", iconHtml: PALLET_BOXES, load: loadConsignmentSettings },
   { id: "setup",     name: "Setup",     icon: "fa-screwdriver-wrench", load: loadBackupsList },
 ];
 
@@ -167,7 +166,8 @@ function renderSettingsNav() {
   nav.style.gridTemplateColumns = `repeat(${SETTINGS_PAGES.length + 1}, minmax(0, 1fr))`;
   nav.innerHTML = `<a href="#" class="py-2 text-center text-sm"><i class="fa-solid fa-house text-2xl block"></i>Home</a>`
     + SETTINGS_PAGES.map((p) => `<a href="#settings/${p.id}" data-settings-nav="${p.id}" class="py-2 text-center text-[11px] sm:text-sm">`
-      + `<i class="fa-solid ${p.icon} text-2xl block"></i>${esc(p.name)}</a>`).join("");
+      + (p.iconHtml ? `<span class="h-8 flex items-center justify-center text-[1.6rem]">${p.iconHtml}</span>` : `<i class="fa-solid ${p.icon} text-2xl block"></i>`)
+      + `${esc(p.name)}</a>`).join("");
 }
 
 // --------------------------------------------------------------------------
@@ -178,15 +178,16 @@ function show() {
   const inSettings = hash === "#settings" || hash.startsWith("#settings/");
   if (!inSettings) lockSettings();
   const m = MODULES.find((x) => `#${x.id}` === hash);
-  // Off the sulfur screen, the operator stays signed in for a 10-minute
-  // grace period (Operator.leave), so popping out to Home needs no rescan.
-  if (hash !== "#sulfur" && hash !== "#acid") Operator.leave();
-  const badged = m && (m.id === "sulfur" || m.id === "acid"); // roles that open with a badge scan
+  // Roles that open with a badge scan. Off their screens the operator stays
+  // signed in for a 10-minute grace period (Operator.leave), so popping out
+  // to Home needs no rescan.
+  const BADGED = ["sulfur", "acid", "palletstack"];
+  if (!BADGED.some((id) => hash === `#${id}`)) Operator.leave();
+  const badged = m && BADGED.includes(m.id);
   const view = inSettings ? (unlocked ? "settings" : "pin")
     : badged ? (Operator.current() ? m.id : "scan")
-    : m && m.id === "consignment" ? "consignment"
     : m ? "module" : "home";
-  for (const id of ["home", "module", "scan", "sulfur", "acid", "consignment", "pin", "settings"]) $(id).classList.toggle("hidden", id !== view);
+  for (const id of ["home", "module", "scan", "sulfur", "acid", "palletstack", "pin", "settings"]) $(id).classList.toggle("hidden", id !== view);
   // The settings menu replaces the main one only once the PIN is in; the
   // PIN pad keeps the main menu so Home is one tap away.
   $("mainNav").classList.toggle("hidden", view === "settings");
@@ -202,11 +203,11 @@ function show() {
   }
   if (view === "pin") { pinEntry = ""; $("pinError").textContent = ""; renderPinDots(); }
   if (view !== "scan") stopCamera();
-  if (view !== "consignment") stopPalletScan();
+  if (view !== "palletstack") stopPalletScan();
   if (view === "scan") $("scanMsg").textContent = "";
   if (view === "sulfur") renderSulfur(true);
   if (view === "acid") renderAcid(true);
-  if (view === "consignment") renderConsignment();
+  if (view === "palletstack") renderConsignment();
   if (view === "settings") {
     touchSettings();
     document.querySelectorAll("[data-settings-page]").forEach((el) =>

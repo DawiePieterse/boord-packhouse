@@ -45,6 +45,10 @@ class PalletIn(SQLModel):
     market_id: Optional[int] = None
     market_name: str = ""
     date_code: str = ""
+    scanned_by: str = ""
+    scanned_by_name: str = ""
+    changed_by: str = ""
+    changed_by_name: str = ""
     lines: list = []
     removed: bool = False
 
@@ -62,7 +66,7 @@ def _lines_problem(lines: list) -> Optional[str]:
         if not isinstance(ln, dict) or not (isinstance(ln.get("cartons"), int) and ln["cartons"] >= 1):
             return "every line needs a whole number of cartons"
         if not (isinstance(ln.get("carton_kg"), (int, float)) and ln["carton_kg"] > 0) or not ln.get("packaging_name"):
-            return "every line needs a pack and its carton weight"
+            return "every line needs a carton type and its weight"
     return None
 
 
@@ -133,8 +137,10 @@ def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
             scanned = _utc_naive(rec.scanned_at)
             year = to_local(scanned).year
             row = Pallet(uuid=rec.uuid, consignment_uuid=rec.consignment_uuid, scanned_at=scanned, device=body.device,
-                         synced_at=now, barcode="", pallet_year=year, pallet_no=_next_number(session, year))
+                         synced_at=now, barcode="", pallet_year=year, pallet_no=_next_number(session, year),
+                         scanned_by=rec.scanned_by, scanned_by_name=rec.scanned_by_name)
         row.barcode, row.removed = rec.barcode.strip(), rec.removed
+        row.changed_by, row.changed_by_name = rec.changed_by, rec.changed_by_name
         if not rec.removed:
             row.lines, row.pallet_ref = json.dumps(rec.lines), rec.pallet_ref
             row.supplier_id, row.supplier_name = rec.supplier_id, rec.supplier_name

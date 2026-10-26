@@ -8,8 +8,10 @@
 // consignment / pallet), the sulfur technique (sulfur.js), but pallets stay
 // editable: saving again re-queues the whole record (rev). A stack only
 // groups pallets and has no screen of its own yet: a new pallet goes on the
-// newest one, made the first time. Uses $, esc from app.js and Html5Qrcode
-// from shared/vendor.
+// newest one, made the first time. Opens with the badge scan, like the sulfur
+// screen: a pallet keeps who scanned it in and who last changed it. Uses
+// Operator and renderOperatorBar from sulfur.js, $, esc from app.js and
+// Html5Qrcode from shared/vendor.
 
 let cn = { view: "list", draft: null };
 let palletScanner = null;
@@ -31,6 +33,8 @@ const newestFirst = () => Store.pallets().sort((a, b) => (a.scanned_at < b.scann
 
 function renderConsignment() {
   if (cn.view !== "pallet") stopPalletScan();
+  renderOperatorBar($("consignmentOperatorBar"));
+  $("consignmentOperatorBar").classList.toggle("hidden", cn.view === "pallet"); // the form needs the room
   $("consignmentBody").innerHTML = cn.view === "pallet" ? palletForm() : palletsView();
 }
 
@@ -46,7 +50,7 @@ function palletsView() {
         <div class="text-sm shrink-0"><b>${palletCartons(p)}</b> cartons · ${kgText(palletKg(p))}</div>
       </div>
       <div class="text-sm">${esc(palletDateCode(p))} · ${esc(p.supplier_name || "-")} · ${esc(p.market_name || "-")}</div>
-      <div class="text-xs text-slate-500 truncate">Barcode ${esc(p.barcode)}</div>
+      <div class="text-xs text-slate-500 truncate">Barcode ${esc(p.barcode)}${p.scanned_by_name ? ` · ${esc(p.scanned_by_name)}` : ""}</div>
       <ol class="list-decimal pl-6 mt-1 text-sm">
         ${p.lines.map((l) => `<li><b>${l.cartons}</b> x ${esc(l.packaging_name)}${l.block_id ? `, ${esc(l.block_name)}${l.variety ? `, ${esc(l.variety)}` : ""}` : ""}, Litchis</li>`).join("")}
       </ol>
@@ -255,14 +259,17 @@ async function savePallet() {
   if (!barcode) return fail("Scan the pallet label first.");
   const twin = seasonPallets(d.pallet ? seasonOf(d.pallet.scanned_at) : seasonOf(nowIso())).find((p) => p.pallet_ref === d.ref && p.uuid !== d.uuid);
   if (twin) return fail(`Pallet ${d.ref} is already used this season.`);
-  if (!lines.length) return fail("Pick a pack and the number of cartons.");
+  if (!lines.length) return fail("Pick a carton type and the number of cartons.");
   // A line with only one of the two is a slip, not a blank line to skip.
-  if (d.lines.some((l) => (l.packaging_id != null) !== (Number(l.cartons) >= 1))) return fail("Every line needs a pack and a number of cartons.");
+  if (d.lines.some((l) => (l.packaging_id != null) !== (Number(l.cartons) >= 1))) return fail("Every line needs a carton type and a number of cartons.");
   const other = palletWithCode(barcode, d.uuid);
   if (other) return fail(`That label is already on pallet ${other.pallet_ref}.`);
   stopPalletScan();
-  const base = d.pallet || { kind: "pallet", consignment_uuid: await currentStack(), scanned_at: nowIso() };
+  const op = Operator.current() || {};
+  const base = d.pallet || { kind: "pallet", consignment_uuid: await currentStack(), scanned_at: nowIso(),
+                             scanned_by: op.id || "", scanned_by_name: op.name || "" };
   await Store.saveRun({ ...base, kind: "pallet", uuid: d.uuid, barcode, lines, pallet_ref: d.ref,
+                        changed_by: op.id || "", changed_by_name: op.name || "",
                         supplier_id: supplier.id, supplier_name: supplier.name, market_id: market.id, market_name: market.name,
                         date_code: palletDateCode(d.pallet), removed: false, rev: Date.now() });
   cn.view = "list";
@@ -272,7 +279,8 @@ async function savePallet() {
 async function removePallet() {
   const d = cn.draft;
   if (!confirm("Delete this pallet?")) return;
-  await Store.saveRun({ ...d.pallet, kind: "pallet", removed: true, rev: Date.now() });
+  const op = Operator.current() || {};
+  await Store.saveRun({ ...d.pallet, kind: "pallet", removed: true, changed_by: op.id || "", changed_by_name: op.name || "", rev: Date.now() });
   cn.view = "list";
   renderConsignment();
 }
@@ -280,6 +288,7 @@ async function removePallet() {
 function onConsignmentClick(ev) {
   const t = ev.target.closest("button");
   if (!t) return;
+  Operator.touch(); // working here keeps the operator signed in
   const d = cn.draft;
   const sync = () => { cn.draft.lines = cn.draft.lines.slice(); renderConsignment(); };
   if (t.dataset.pallet) openPallet(Store.pallets().find((p) => p.uuid === t.dataset.pallet));
@@ -308,6 +317,7 @@ function onConsignmentInput(ev) {
   const f = ev.target.dataset.field;
   const v = ev.target.value;
   if (!f) return;
+  Operator.touch();
   if (f === "barcode") { cn.draft.barcode = v; return; }
   if (f === "ref") { cn.draft.ref = v.replace(/\D/g, "").slice(0, 3); ev.target.value = cn.draft.ref; return; }
   if (f === "supplier" || f === "market") { cn.draft[`${f}_id`] = v ? Number(v) : null; return; }
@@ -321,29 +331,34 @@ function onConsignmentInput(ev) {
 
 // ---- Settings -> Consignment ------------------------------------------------
 
+// One compact row a carton or market: name, (kg), In use, delete, save. The
+// column names are said once, above the rows.
 function settingsRow(kind, row) {
   const isNew = row.id == null;
+  const box = "border border-slate-300 rounded-lg px-2 py-2";
   return `
-    <form class="bg-white rounded-2xl shadow p-4 space-y-3" data-cn-form="${kind}" data-id="${isNew ? "new" : row.id}">
-      <div class="flex items-center gap-2">
-        <input name="name" value="${esc(row.name)}" placeholder="${kind === "packaging" ? "Pack, e.g. 1kg XXL" : "Market"}" class="flex-1 min-w-0 border border-slate-300 rounded-lg p-2 text-lg font-semibold">
-        ${kind === "packaging" ? `<label class="block w-28 shrink-0"><span class="text-xs text-slate-500">Carton kg</span>
-          <input name="carton_kg" type="number" step="any" inputmode="decimal" value="${esc(row.carton_kg)}" class="w-full border border-slate-300 rounded-lg p-2"></label>` : ""}
-      </div>
-      <div class="flex items-center justify-between gap-3">
-        ${isNew ? "<span></span>" : `<label class="text-sm flex items-center gap-2"><input name="active" type="checkbox"${row.active ? " checked" : ""} class="w-5 h-5"> In use</label>`}
-        <button class="px-5 ${isNew ? "boord-btn-primary" : "border border-slate-300"} rounded-lg py-2 font-semibold">${isNew ? "Add" : "Save"}</button>
-      </div>
+    <form class="flex items-center gap-1.5 py-2" data-cn-form="${kind}" data-id="${isNew ? "new" : row.id}">
+      <input name="name" value="${esc(row.name)}" placeholder="${isNew ? (kind === "packaging" ? "New carton" : "New market") : ""}" class="flex-1 min-w-0 font-semibold ${box}">
+      ${kind === "packaging" ? `<input name="carton_kg" type="number" step="any" inputmode="decimal" value="${esc(row.carton_kg)}" placeholder="kg" class="w-14 shrink-0 ${box}">` : ""}
+      ${isNew ? `<span class="w-10 shrink-0"></span><span class="w-10 shrink-0"></span>`
+        : `<label class="w-10 shrink-0 flex justify-center" title="In use"><input name="active" type="checkbox"${row.active ? " checked" : ""} class="w-5 h-5"></label>
+           <button type="button" data-cn-delete title="Delete" class="w-10 h-10 shrink-0 rounded-lg border border-red-300 text-red-700"><i class="fa-solid fa-trash-can"></i></button>`}
+      <button class="w-14 shrink-0 h-10 ${isNew ? "boord-btn-primary" : "border border-slate-300"} rounded-lg font-semibold">${isNew ? "Add" : "Save"}</button>
     </form>`;
+}
+
+function settingsCard(kind, rows) {
+  const head = `<div class="flex gap-1.5 pt-3 text-xs text-slate-500"><span class="flex-1">${kind === "packaging" ? "Carton" : "Market"}</span>`
+    + `${kind === "packaging" ? `<span class="w-14 shrink-0">kg</span>` : ""}<span class="w-10 shrink-0 text-center">In use</span><span class="w-10 shrink-0"></span><span class="w-14 shrink-0"></span></div>`;
+  return `<div class="bg-white rounded-2xl shadow px-3 pb-1 divide-y divide-slate-100">${head}`
+    + rows.map((r) => settingsRow(kind, r)).join("") + settingsRow(kind, { id: null, name: "", carton_kg: "" }) + `</div>`;
 }
 
 async function loadConsignmentSettings() {
   try {
     const [packs, markets] = await Promise.all([Boord.api("/api/settings/packaging"), Boord.api("/api/settings/markets")]);
-    $("packagingSettings").innerHTML = packs.map((p) => settingsRow("packaging", p)).join("")
-      + `<div class="text-sm font-semibold text-slate-600 pt-2">Add a pack</div>` + settingsRow("packaging", { id: null, name: "", carton_kg: "" });
-    $("marketSettings").innerHTML = markets.map((m) => settingsRow("markets", m)).join("")
-      + `<div class="text-sm font-semibold text-slate-600 pt-2">Add a market</div>` + settingsRow("markets", { id: null, name: "" });
+    $("packagingSettings").innerHTML = settingsCard("packaging", packs);
+    $("marketSettings").innerHTML = settingsCard("markets", markets);
   } catch (e) {
     if (e.status === 401) { unlocked = false; show(); }
     else $("packagingSettings").innerHTML = $("marketSettings").innerHTML = `<div class="text-sm text-slate-500">These can only be changed while the server can be reached.</div>`;
@@ -370,12 +385,32 @@ async function saveConsignmentSetting(ev) {
   }
 }
 
+async function deleteConsignmentSetting(ev) {
+  const btn = ev.target.closest("[data-cn-delete]");
+  if (!btn) return;
+  const form = btn.closest("[data-cn-form]");
+  const name = new FormData(form).get("name");
+  if (!confirm(`Delete ${name}?`)) return;
+  try {
+    await Boord.api(`/api/settings/${form.dataset.cnForm}/${form.dataset.id}`, { method: "DELETE" });
+    Boord.toast("Deleted");
+    await loadConsignmentSettings();
+    Store.syncNow();
+  } catch (e) {
+    if (e.status === 401) { unlocked = false; show(); return; }
+    Boord.toast(Boord.errorDetail(e, "No connection to the server"));
+  }
+}
+
 function initConsignment() {
   const body = $("consignmentBody");
   body.addEventListener("click", onConsignmentClick);
   body.addEventListener("input", onConsignmentInput);
   body.addEventListener("change", onConsignmentInput);
   $("consignmentSettings").addEventListener("submit", saveConsignmentSetting);
+  $("consignmentSettings").addEventListener("click", deleteConsignmentSetting);
   // A sync landing while a pallet is being filled in must not wipe the form.
-  Store.onChange(() => { if (!$("consignment").classList.contains("hidden") && cn.view !== "pallet") renderConsignment(); });
+  Store.onChange(() => { if (!$("palletstack").classList.contains("hidden") && cn.view !== "pallet") renderConsignment(); });
+  // The operator went idle while this screen was open: back to the badge.
+  setInterval(() => { if (!$("palletstack").classList.contains("hidden") && !Operator.current()) show(); }, 30000);
 }

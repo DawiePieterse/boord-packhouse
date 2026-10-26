@@ -123,3 +123,26 @@ def test_settings_add_edit_retire(admin_client):
     assert admin_client.post("/api/settings/markets", json={"name": " "}).status_code == 422
     m = admin_client.post("/api/settings/markets", json={"name": "Middle East"}).json()
     assert m["sort"] == 5 and admin_client.put("/api/settings/markets/99", json={"name": "x"}).status_code == 404
+
+
+def test_delete_only_what_no_live_pallet_uses(client, admin_client):
+    sync(client, [cons()], [pallet()])  # pack 1, market 1
+    assert admin_client.delete("/api/settings/packaging/1").status_code == 409
+    assert admin_client.delete("/api/settings/markets/1").status_code == 409
+    assert admin_client.delete("/api/settings/packaging/2").status_code == 200
+    assert admin_client.delete("/api/settings/markets/2").status_code == 200
+    assert admin_client.delete("/api/settings/markets/2").status_code == 404
+    assert 2 not in [p["id"] for p in admin_client.get("/api/settings/packaging").json()]
+    sync(client, pallets=[pallet(removed=True)])  # a removed pallet no longer holds them
+    assert admin_client.delete("/api/settings/packaging/1").status_code == 200
+    admin_client.post("/api/admin/logout")
+    assert client.delete("/api/settings/markets/1").status_code == 401
+
+
+def test_who_scanned_it_stays_and_who_changed_it_follows(client):
+    sync(client, [cons()], [pallet(scanned_by="W1", scanned_by_name="Thandi", changed_by="W1", changed_by_name="Thandi")])
+    sync(client, pallets=[pallet(scanned_by="W2", scanned_by_name="Sipho", changed_by="W2", changed_by_name="Sipho")])
+    p = state(client)["pallets"][0]
+    assert (p["scanned_by"], p["scanned_by_name"], p["changed_by_name"]) == ("W1", "Thandi", "Sipho")
+    sync(client, pallets=[pallet(removed=True, changed_by="W3", changed_by_name="Lerato")])
+    assert state(client)["pallets"][0]["changed_by_name"] == "Lerato"

@@ -251,6 +251,10 @@ class Pallet(SQLModel, table=True):
     supplier_name: str = ""
     market_id: Optional[int] = None
     market_name: str = ""
+    scanned_by: str = ""        # Boord worker.id from the badge of who scanned it in; never changes
+    scanned_by_name: str = ""
+    changed_by: str = ""        # who saved (or removed) it last
+    changed_by_name: str = ""
     date_code: str = ""         # suggest.js's dateCode of the day scanned (4104 = Monday of week 44), kept as scanned
     removed: bool = False
     pallet_year: Optional[int] = None
