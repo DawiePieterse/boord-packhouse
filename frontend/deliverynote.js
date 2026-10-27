@@ -68,7 +68,7 @@ function notesView() {
 
 function noteRow(n) {
   return `
-    <button type="button" data-note="${esc(n.uuid)}" class="w-full text-left border-t py-2 active:bg-slate-50">
+    <button type="button" data-note="${esc(n.uuid)}" class="${groupRow(noteGroup(n))}">
       <div class="flex justify-between gap-3 items-baseline">
         <div class="font-bold text-lg">Note ${esc(noteLabel(n))}</div>
         <div class="text-sm shrink-0">${esc(dnDay(n.loaded_on))}</div>
@@ -129,7 +129,7 @@ function noteForm() {
       + group.map((p) => {
       const on = d.picked.includes(p.uuid);
       return `
-    <button type="button" data-pick="${esc(p.uuid)}" ${off ? "disabled" : ""} class="w-full text-left flex gap-3 border-t py-2 ${on ? "bg-blue-50" : off ? "opacity-40" : "active:bg-slate-50"}">
+    <button type="button" data-pick="${esc(p.uuid)}" ${off ? "disabled" : ""} class="${groupRow(key, on, "flex gap-3", off ? "opacity-40" : "")}">
       <i class="fa-${on ? "solid fa-square-check text-blue-700" : "regular fa-square text-slate-400"} text-2xl pt-1"></i>
       <div class="flex-1 min-w-0">${palletSummary(p)}</div>
     </button>`;

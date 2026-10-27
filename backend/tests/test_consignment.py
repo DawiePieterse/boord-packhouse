@@ -114,6 +114,14 @@ def test_settings_need_the_pin_and_floor_lists_do_not(client, admin_client):
     assert client.get("/api/packaging").json()[0]["carton_kg"] == 0.48
 
 
+def test_packs_come_lightest_first(client, admin_client):
+    admin_client.post("/api/settings/packaging", json={"name": "Heavy 9 kg", "carton_kg": 9})
+    admin_client.post("/api/settings/packaging", json={"name": "Light 0.2 kg", "carton_kg": 0.2})
+    for path in ("/api/packaging", "/api/settings/packaging"):
+        kg = [p["carton_kg"] for p in admin_client.get(path).json()]
+        assert kg == sorted(kg) and kg[0] == 0.2 and kg[-1] == 9
+
+
 def test_settings_add_edit_retire(admin_client):
     r = admin_client.post("/api/settings/packaging", json={"name": "500g", "carton_kg": 0.55})
     assert r.status_code == 200 and r.json()["sort"] == 4

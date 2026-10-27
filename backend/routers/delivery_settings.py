@@ -8,7 +8,7 @@ live note uses.
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session, SQLModel, select
+from sqlmodel import Session, SQLModel, func, select
 
 from admin_auth import require_admin
 from db import get_packhouse_session
@@ -50,7 +50,7 @@ def _delete(session: Session, model, column, row_id: int):
 
 @router.get("/transporters")
 def all_transporters(session: Session = Depends(get_packhouse_session)):
-    return session.exec(select(Transporter).order_by(Transporter.sort, Transporter.id)).all()
+    return session.exec(select(Transporter).order_by(func.lower(Transporter.name), Transporter.id)).all()
 
 
 @router.post("/transporters")
@@ -70,7 +70,7 @@ def delete_transporter(row_id: int, session: Session = Depends(get_packhouse_ses
 
 @router.get("/receivers")
 def all_receivers(session: Session = Depends(get_packhouse_session)):
-    return session.exec(select(Receiver).order_by(Receiver.sort, Receiver.id)).all()
+    return session.exec(select(Receiver).order_by(func.lower(Receiver.name), Receiver.id)).all()
 
 
 @router.post("/receivers")
