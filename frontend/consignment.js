@@ -148,7 +148,6 @@ function openPallet(pallet) {
                  lines: [{ packaging_id: stillOffered(Store.packaging(), last.packaging_id), cartons: "", block_id: last.block_id || "" }] };
   }
   renderConsignment();
-  if (!pallet) startPalletScan();
 }
 
 // The active list plus the pallet's own copy if it has since been retired
