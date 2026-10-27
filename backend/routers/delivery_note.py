@@ -10,6 +10,7 @@ pallet when the note is saved, so a pallet edited afterwards leaves a note
 that has gone out as it was. The PDF is the paper note with every pallet and
 its lines, to print or share on WhatsApp.
 """
+import io
 import json
 from datetime import date, datetime, timedelta
 from typing import List, Optional
@@ -373,3 +374,112 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     name = f"afleweringsnota_{n.note_no}.pdf"
     return Response(bytes(pdf.output()), media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+# The USA export papers (the farm's "Lw 2290 #41" workbook): DAFF's accompanying
+# document for the phyto inspection, the consignment note and PPECB's
+# inspection findings sheet, one row per pallet line. The farm's registration
+# numbers are printed here as the note's sender is.
+# ponytail: one exporter (AgriLink); move these to Settings -> Delivery Note when a second one ships
+EXPORTER = ["AgriLink", "Ben Halliday", "0829003515"]
+PRODUCER = ["Bekfontein", "Jeppes Reef rd", "Malalane"]
+PUC, PHC, INSPECTION_POINT, GGN = "D2087", "D 12167", 6142, "4050373828202"
+PACKHOUSE_CONTACT = "0836276926"
+SIZES = ("XXXL", "XXL", "XL", "L", "M", "S", "MIX")
+
+
+def _count(pack: str) -> str:
+    """The size count (XL) out of the pack's name (Rhino 4.5 kg XL)."""
+    return next((w for w in pack.upper().replace(",", " ").split() if w in SIZES), "")
+
+
+def _usa_rows(n: DeliveryNote) -> list:
+    rows = []
+    for p in json.loads(n.pallets or "[]"):
+        for ln in p["lines"]:
+            rows.append({"pallet_no": p["pallet_ref"], "pallet_id": p["barcode"].replace("(00)", "", 1),
+                         "variety": ln.get("variety") or "", "block": (ln.get("block_name") or "").replace("Block ", ""),
+                         "cartons": ln["cartons"], "date_code": p["date_code"], "count": _count(ln["packaging_name"]),
+                         "pack": ln["packaging_name"]})
+    return rows
+
+
+@router.get("/{uuid}/usa.xlsx")
+def note_usa(uuid: str, session: Session = Depends(get_packhouse_session)):
+    """The note's pallets on the USA export papers, ready to print."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    n = session.get(DeliveryNote, uuid)
+    if n is None or n.removed:
+        raise HTTPException(404, "No such delivery note")
+    rows, doc_no, day = _usa_rows(n), f"LW {n.note_no}", _day(n.loaded_on)
+    cartons, pallets = sum(r["cartons"] for r in rows), len(json.loads(n.pallets or "[]"))
+    bold = Font(bold=True)
+    wb = Workbook()
+
+    def sheet(ws, title, head, body, widths):
+        ws.title = title
+        for line in head:
+            ws.append(line)
+        ws.append([])
+        top = ws.max_row + 1
+        for line in body:
+            ws.append(line)
+        for cell in ws[top]:
+            cell.font = bold
+        ws["A1"].font = Font(bold=True, size=13)
+        for i, w in enumerate(widths):
+            ws.column_dimensions[chr(65 + i)].width = w
+        ws.print_title_rows = f"{top}:{top}"  # each printed page repeats the column heads
+        ws.page_setup.orientation = "landscape"
+        ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+
+    sheet(wb.active, "Phyto", [
+        ["ACCOMPANYING DOCUMENT FOR PHYTOSANITARY INSPECTIONS FOR FRESH FRUIT"],
+        ["Document No / Series No", doc_no, "", "Inspection Date", day],
+        ["Commodity", "Litchis", "", "Importing Country", "USA"],
+        ["Exporting Company & contact details", ", ".join(EXPORTER)],
+        ["Producer's Address", ", ".join(PRODUCER)],
+        ["Magisterial District", PRODUCER[-1], "", "Inspection Depot", INSPECTION_POINT],
+        ["Packhouse Code", PHC, "", "Packhouse Person's Contact Details", PACKHOUSE_CONTACT],
+        ["Intake Document No.", doc_no, "", "PUCs", PUC, "Total Cartons", cartons, "Total Pallets", pallets],
+    ], [["#", "Pallet ID", "PUC", "Variety", "Block No", "Carton Quantity", "Date code", "Count", "Pallet Nr"]]
+       + [[i + 1, r["pallet_id"], PUC, r["variety"], r["block"], r["cartons"], r["date_code"], r["count"], r["pallet_no"]]
+          for i, r in enumerate(rows)]
+       + [[], ["", "Results of Inspection"], ["", "Signature of DAFF Inspector:"], ["", "Signature of foreign Inspector:"]],
+          [5, 22, 9, 26, 10, 15, 10, 8, 14])
+
+    sheet(wb.create_sheet(), "Consignment", [
+        ["CONSIGNMENT NOTE", "", "", "", "", "Consignment nr:", doc_no],
+        ["Sender:", FARM, "", "Receiver:", n.receiver.replace("\n", ", "), "PUC Code:", PUC],
+        ["", ", ".join(SENDER[1:]).title(), "", "", "", "PHC Code:", PHC],
+        ["Date:", day, "", "", "", "GGN Nr:", GGN],
+        ["", "", "", "", "", "GlobalG.A.P. Certified"],
+        ["", "", "", "", "", "Inspection point nr:", INSPECTION_POINT],
+        ["", "", "", "", "", "Target market:", "USA"],
+    ], [["#", "Pallet nr", "Pallet Id", "Start date", "Commodity", "Variety", "Grade", "Count", "Block nr", "Package type", "Units"]]
+       + [[i + 1, r["pallet_no"], r["pallet_id"], r["date_code"], "Litchis", r["variety"], "Class 1", r["count"],
+           r["block"], r["pack"], r["cartons"]] for i, r in enumerate(rows)]
+       + [["", "", "", "", "", "", "", "", "", "Total units", cartons], [],
+          ["Inspection Date:", day], ["Inspector nr:"], ["Contact Nr:"], ["Signature:"], [],
+          ["Driver Signature:", "", "", "Date:"], ["Receiving Signature:", "", "", "Date:"], ["", "", "", "", "", "", "", "", "Packhouse Representative"]],
+          [5, 10, 22, 10, 10, 18, 9, 8, 9, 16, 9])
+
+    findings = ["Decay", "Torn out stems", "Injuries", "Blemishes", "Sooty mould", "Incomplete Sulphur", "Double Litchis",
+                "Absence of stems", "Long stem", "Fruit age", "Bruto mass", "Smaller 22 mm", "Uniformity", "Min. Diameter"]
+    sheet(wb.create_sheet(), "Inspection Sheet", [
+        ["PPECB INSPECTION FINDINGS SHEET - LITCHIS (PP04.01-05F08 L)"],
+        ["Inspector & No:", "", "Exporter:", EXPORTER[0], "PHC:", PHC, "PUC:", PUC],
+        ["Signature:", "", "Insp. point:", INSPECTION_POINT, "Date:", day],
+        ["Cultivar:", ", ".join(sorted({r["variety"] for r in rows if r["variety"]})), "Product:", "Litchis",
+         "Consignment note numbers:", doc_no],
+    ], [["Pallet barcode ID", "Net mass", "Class", "Target market"] + findings + ["C - Comply / R - Rejected"]]
+       + [[r["pallet_id"], "", 1, "USA"] for r in rows]
+       + [[], ["Passed for Export Stickers:", "From:", "", "To:"], ["Remarks:"]],
+          [22, 9, 6, 10] + [9] * len(findings) + [12])
+
+    out = io.BytesIO()
+    wb.save(out)
+    return Response(out.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="usa_{n.note_no}.xlsx"'})

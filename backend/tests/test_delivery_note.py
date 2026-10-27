@@ -117,3 +117,17 @@ def test_last_number_follows_notes_and_settings_can_change_it(client, admin_clie
     assert admin_client.put("/api/settings/deliverynote", json={"cooled_to": 8, "last_no": 0}).status_code == 422
     admin_client.put("/api/settings/deliverynote", json={"cooled_to": 8, "last_no": None})
     assert last() == 1341  # cleared: the highest note ever used
+
+
+def test_usa_papers_list_every_pallet_line(client, pallets):
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+    sync(client, note(pallets=("p1", "p2")))
+    r = client.get("/api/deliverynote/n1/usa.xlsx")
+    assert r.status_code == 200 and 'usa_1335.xlsx' in r.headers["content-disposition"]
+    wb = load_workbook(BytesIO(r.content))
+    assert wb.sheetnames == ["Phyto", "Consignment", "Inspection Sheet"]
+    rows = [row for row in wb["Phyto"].iter_rows(values_only=True) if row[0] in (1, 2)]
+    assert [(row[1], row[2], row[8]) for row in rows] == [("060099005963004759", "D2087", "001"), ("B2", "D2087", "002")]
+    assert client.get("/api/deliverynote/nope/usa.xlsx").status_code == 404
