@@ -248,7 +248,8 @@ def _consignment(wb, f):
     _put(ws, "A3:D3", "Sender", "head")
     _put(ws, "E3:H3", "Receiver", "head")
     _put(ws, "I3:K3", "Consignment", "head")
-    sender = [(line, None) for line in SENDER] + [("PUC code", PUC), ("PHC code", PHC), ("GGN", GGN)]
+    sender = [(line, None) for line in SENDER] + [("PUC code", PUC), ("PHC code", PHC), ("GGN", GGN),
+                                                 ("GlobalG.A.P. Certified", None)]
     codes = [("Consignment nr", f["doc_no"]), ("Date", f["day"]), ("Inspection point", INSPECTION_POINT),
              ("Target market", f["market"])]
     for i, (a, b) in enumerate(sender):
@@ -266,7 +267,7 @@ def _consignment(wb, f):
     _put(ws, "I8:I10", "Target receiver", "label", top=True)
     _put(ws, "J8:K10", f["target"], top=True)
 
-    head = 12
+    head = 13
     titles = ("#", "Pallet nr", "Pallet ID", "Start date", "Commodity", "Variety", "Grade", "Count", "Block nr",
               "Package type", "Units")
     for i, title in enumerate(titles):
