@@ -10,16 +10,15 @@ pallet when the note is saved, so a pallet edited afterwards leaves a note
 that has gone out as it was. The PDF is the paper note with every pallet and
 its lines, to print or share on WhatsApp.
 """
-import io
 import json
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlmodel import Session, SQLModel, func, select
 
+import usa_forms
 from db import get_packhouse_session
 from models import DeliveryNote, DeliveryNoteSettings, Pallet, Receiver, Transporter
 from routers.sulfur import _iso, _now, _utc_naive
@@ -377,158 +376,28 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
-# The USA export papers (the farm's "Lw 2290 #41" workbook): DAFF's accompanying
-# document for the phyto inspection, the consignment note and PPECB's
-# inspection findings sheet, one row per pallet line. The farm's registration
-# numbers are printed here as the note's sender is.
-# ponytail: one exporter (AgriLink); move these to Settings -> Delivery Note when a second one ships
-EXPORTER = ["AgriLink", "Ben Halliday", "0829003515"]
-PRODUCER = ["Bekfontein", "Jeppes Reef rd", "Malalane"]
-PUC, PHC, INSPECTION_POINT, GGN = "D2087", "D 12167", 6142, "4050373828202"
-PACKHOUSE_CONTACT = "0836276926"
-SIZES = ("XXXL", "XXL", "XL", "L", "M", "S", "MIX")
+
+def _xlsx(content: bytes, name: str) -> Response:
+    return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
-def _count(pack: str) -> str:
-    """The size count (XL) out of the pack's name (Rhino 4.5 kg XL)."""
-    return next((w for w in pack.upper().replace(",", " ").split() if w in SIZES), "")
-
-
-def _usa_rows(n: DeliveryNote) -> list:
-    rows = []
-    for p in json.loads(n.pallets or "[]"):
-        for ln in p["lines"]:
-            rows.append({"pallet_no": p["pallet_ref"], "pallet_id": p["barcode"].replace("(00)", "", 1),
-                         "variety": ln.get("variety") or "", "block": (ln.get("block_name") or "").replace("Block ", ""),
-                         "cartons": ln["cartons"], "date_code": p["date_code"], "count": _count(ln["packaging_name"]),
-                         "pack": ln["packaging_name"]})
-    return rows
-
-
-@router.get("/{uuid}/usa.xlsx")
-def note_usa(uuid: str, session: Session = Depends(get_packhouse_session)):
-    """The note's pallets on the USA export papers, ready to print."""
-    from openpyxl import Workbook
-    from openpyxl.styles import Font
+def _live(uuid: str, session: Session) -> DeliveryNote:
     n = session.get(DeliveryNote, uuid)
     if n is None or n.removed:
         raise HTTPException(404, "No such delivery note")
-    rows, doc_no, day = _usa_rows(n), f"LW {n.note_no}", _day(n.loaded_on)
-    cartons, pallets = sum(r["cartons"] for r in rows), len(json.loads(n.pallets or "[]"))
-    bold = Font(bold=True)
-    wb = Workbook()
-
-    def sheet(ws, title, head, body, widths):
-        ws.title = title
-        for line in head:
-            ws.append(line)
-        ws.append([])
-        top = ws.max_row + 1
-        for line in body:
-            ws.append(line)
-        for cell in ws[top]:
-            cell.font = bold
-        ws["A1"].font = Font(bold=True, size=13)
-        for i, w in enumerate(widths):
-            ws.column_dimensions[chr(65 + i)].width = w
-        ws.print_title_rows = f"{top}:{top}"  # each printed page repeats the column heads
-        ws.page_setup.orientation = "landscape"
-        ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
-        ws.sheet_properties.pageSetUpPr.fitToPage = True
-
-    sheet(wb.active, "Phyto", [
-        ["ACCOMPANYING DOCUMENT FOR PHYTOSANITARY INSPECTIONS FOR FRESH FRUIT"],
-        ["Document No / Series No", doc_no, "", "Inspection Date", day],
-        ["Commodity", "Litchis", "", "Importing Country", "USA"],
-        ["Exporting Company & contact details", ", ".join(EXPORTER)],
-        ["Producer's Address", ", ".join(PRODUCER)],
-        ["Magisterial District", PRODUCER[-1], "", "Inspection Depot", INSPECTION_POINT],
-        ["Packhouse Code", PHC, "", "Packhouse Person's Contact Details", PACKHOUSE_CONTACT],
-        ["Intake Document No.", doc_no, "", "PUCs", PUC, "Total Cartons", cartons, "Total Pallets", pallets],
-    ], [["#", "Pallet ID", "PUC", "Variety", "Block No", "Carton Quantity", "Date code", "Count", "Pallet Nr"]]
-       + [[i + 1, r["pallet_id"], PUC, r["variety"], r["block"], r["cartons"], r["date_code"], r["count"], r["pallet_no"]]
-          for i, r in enumerate(rows)]
-       + [[], ["", "Results of Inspection"], ["", "Signature of DAFF Inspector:"], ["", "Signature of foreign Inspector:"]],
-          [5, 22, 9, 26, 10, 15, 10, 8, 14])
-
-    sheet(wb.create_sheet(), "Consignment", [
-        ["CONSIGNMENT NOTE", "", "", "", "", "Consignment nr:", doc_no],
-        ["Sender:", FARM, "", "Receiver:", n.receiver.replace("\n", ", "), "PUC Code:", PUC],
-        ["", ", ".join(SENDER[1:]).title(), "", "", "", "PHC Code:", PHC],
-        ["Date:", day, "", "", "", "GGN Nr:", GGN],
-        ["", "", "", "", "", "GlobalG.A.P. Certified"],
-        ["", "", "", "", "", "Inspection point nr:", INSPECTION_POINT],
-        ["", "", "", "", "", "Target market:", "USA"],
-    ], [["#", "Pallet nr", "Pallet Id", "Start date", "Commodity", "Variety", "Grade", "Count", "Block nr", "Package type", "Units"]]
-       + [[i + 1, r["pallet_no"], r["pallet_id"], r["date_code"], "Litchis", r["variety"], "Class 1", r["count"],
-           r["block"], r["pack"], r["cartons"]] for i, r in enumerate(rows)]
-       + [["", "", "", "", "", "", "", "", "", "Total units", cartons], [],
-          ["Inspection Date:", day], ["Inspector nr:"], ["Contact Nr:"], ["Signature:"], [],
-          ["Driver Signature:", "", "", "Date:"], ["Receiving Signature:", "", "", "Date:"], ["", "", "", "", "", "", "", "", "Packhouse Representative"]],
-          [5, 10, 22, 10, 10, 18, 9, 8, 9, 16, 9])
-
-    findings = ["Decay", "Torn out stems", "Injuries", "Blemishes", "Sooty mould", "Incomplete Sulphur", "Double Litchis",
-                "Absence of stems", "Long stem", "Fruit age", "Bruto mass", "Smaller 22 mm", "Uniformity", "Min. Diameter"]
-    sheet(wb.create_sheet(), "Inspection Sheet", [
-        ["PPECB INSPECTION FINDINGS SHEET - LITCHIS (PP04.01-05F08 L)"],
-        ["Inspector & No:", "", "Exporter:", EXPORTER[0], "PHC:", PHC, "PUC:", PUC],
-        ["Signature:", "", "Insp. point:", INSPECTION_POINT, "Date:", day],
-        ["Cultivar:", ", ".join(sorted({r["variety"] for r in rows if r["variety"]})), "Product:", "Litchis",
-         "Consignment note numbers:", doc_no],
-    ], [["Pallet barcode ID", "Net mass", "Class", "Target market"] + findings + ["C - Comply / R - Rejected"]]
-       + [[r["pallet_id"], "", 1, "USA"] for r in rows]
-       + [[], ["Passed for Export Stickers:", "From:", "", "To:"], ["Remarks:"]],
-          [22, 9, 6, 10] + [9] * len(findings) + [12])
-
-    out = io.BytesIO()
-    wb.save(out)
-    return Response(out.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    headers={"Content-Disposition": f'attachment; filename="usa_{n.note_no}.xlsx"'})
-
-
-# The same papers on the farm's own forms: templates/usa_forms.xlsx is their
-# workbook with what a note fills in blanked out (made once from
-# "Lw 2290 #41"). Its pallet rows are fixed: 13 on Phyto (1), 8 on Phyto (2).
-# openpyxl keeps its pictures but not its drawn boxes (the PPECB stamp box).
-TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "usa_forms.xlsx"
-FORM_ROWS = 21
+    return n
 
 
 @router.get("/{uuid}/usa_forms.xlsx")
 def note_usa_forms(uuid: str, session: Session = Depends(get_packhouse_session)):
-    """The note's pallets filled into the farm's USA forms, to print as they always were."""
-    from openpyxl import load_workbook
-    n = session.get(DeliveryNote, uuid)
-    if n is None or n.removed:
-        raise HTTPException(404, "No such delivery note")
-    rows, doc_no = _usa_rows(n), f"LW {n.note_no}"
-    if len(rows) > FORM_ROWS:
-        raise HTTPException(422, f"The USA forms hold {FORM_ROWS} pallet lines, this note has {len(rows)}: use the simple Excel")
-    day = date.fromisoformat(n.loaded_on) if n.loaded_on else None
-    cartons, pallets = sum(r["cartons"] for r in rows), len(json.loads(n.pallets or "[]"))
-    varieties = ", ".join(sorted({r["variety"] for r in rows if r["variety"]}))
-    wb = load_workbook(TEMPLATE)
-    p1, p2, c, ins = wb["Phyto (1)"], wb["Phyto (2)"], wb["Consignment 1"], wb["Inspection Sheet"]
+    """The note's pallets on the USA export papers, drawn as the farm's forms (usa_forms.py)."""
+    n = _live(uuid, session)
+    return _xlsx(usa_forms.forms(n), f"usa_forms_{n.note_no}.xlsx")
 
-    for ws in (p1, p2):
-        ws["C5"], ws["I9"] = doc_no, day
-        ws["H19"], ws["J19"], ws["K19"], ws["L19"] = doc_no, PUC, cartons, pallets
-    for i, r in enumerate(rows):
-        ws, row = (p1, 27 + i) if i < 13 else (p2, 14 + i)
-        for col, v in zip("ABHIJKLMN", (i + 1, r["pallet_id"], PUC, r["variety"], r["block"], r["cartons"],
-                                        r["date_code"], r["count"], r["pallet_no"])):
-            ws[f"{col}{row}"] = v
-        for col, v in zip("ABCDEFGHIJK", (i + 1, r["pallet_no"], r["pallet_id"], r["date_code"], "Litchis", r["variety"],
-                                          "Class 1", r["count"], r["block"], r["pack"], r["cartons"])):
-            c[f"{col}{11 + i}"] = v
-        ins[f"A{14 + 2 * i}"], ins[f"C{14 + 2 * i}"], ins[f"D{15 + 2 * i}"] = r["pallet_id"], 1, "USA"
 
-    c["K2"], c["C6"], c["C33"], c["K32"] = doc_no, day, day, cartons
-    for i, line in enumerate(n.receiver.split("\n")[:6]):
-        c[f"F{2 + i}"] = line
-    ins["E9"], ins["K10"], ins["B12"], ins["C11"] = EXPORTER[0], day, doc_no, f"CULTIVAR:  {varieties}"
-
-    out = io.BytesIO()
-    wb.save(out)
-    return Response(out.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    headers={"Content-Disposition": f'attachment; filename="usa_forms_{n.note_no}.xlsx"'})
+@router.get("/{uuid}/usa.xlsx")
+def note_usa(uuid: str, session: Session = Depends(get_packhouse_session)):
+    """The same papers as plain tables."""
+    n = _live(uuid, session)
+    return _xlsx(usa_forms.simple(n), f"usa_{n.note_no}.xlsx")

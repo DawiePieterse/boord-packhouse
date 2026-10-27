@@ -133,7 +133,7 @@ def test_usa_papers_list_every_pallet_line(client, pallets):
     assert client.get("/api/deliverynote/nope/usa.xlsx").status_code == 404
 
 
-def test_usa_forms_fill_the_farms_own_workbook(client, pallets):
+def test_usa_forms_are_drawn_from_the_note(client, pallets):
     from io import BytesIO
 
     from openpyxl import load_workbook
@@ -141,7 +141,24 @@ def test_usa_forms_fill_the_farms_own_workbook(client, pallets):
     r = client.get("/api/deliverynote/n1/usa_forms.xlsx")
     assert r.status_code == 200 and 'usa_forms_1335.xlsx' in r.headers["content-disposition"]
     wb = load_workbook(BytesIO(r.content))
-    p1, c, ins = wb["Phyto (1)"], wb["Consignment 1"], wb["Inspection Sheet"]
-    assert (p1["C5"].value, p1["B27"].value, p1["N28"].value, p1["K19"].value) == ("LW 1335", "060099005963004759", "002", 120)
-    assert (c["K2"].value, c["C12"].value, c["F2"].value, c["A13"].value) == ("LW 1335", "B2", "Boeretrust", None)
-    assert (ins["A16"].value, ins["D17"].value) == ("B2", "USA")
+    assert wb.sheetnames == ["Phyto", "Consignment", "Inspection Sheet"]
+    p, c, ins = wb["Phyto"], wb["Consignment"], wb["Inspection Sheet"]
+    assert (p["D5"].value, p["B19"].value, p["J20"].value, p["F16"].value, p["B21"].value) == (
+        "LW 1335", "060099005963004759", "002", 120, None)
+    assert (c["J4"].value, c["C14"].value, c["E4"].value, c["K15"].value) == ("LW 1335", "B2", "Boeretrust", 120)
+    assert (ins["A11"].value, ins["D11"].value) == ("B2", "USA")
+
+
+def test_usa_forms_run_the_phyto_form_onto_more_pages():
+    import json as _json
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    import usa_forms
+    from models import DeliveryNote
+    line = {"cartons": 192, "packaging_name": "Rhino 4.5 kg XL", "carton_kg": 4.5}
+    n = DeliveryNote(uuid="x", note_no=7, created_at=datetime.now(), loaded_on="2026-10-26", receiver="AgriLink",
+                     pallets=_json.dumps([{"pallet_ref": str(k), "barcode": "", "date_code": "", "lines": [line]} for k in range(27)]))
+    wb = load_workbook(BytesIO(usa_forms.forms(n)))
+    assert wb.sheetnames[:3] == ["Phyto 1", "Phyto 2", "Phyto 3"] and wb["Phyto 3"]["A19"].value == 27
