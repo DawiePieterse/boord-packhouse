@@ -1,8 +1,9 @@
-"""The USA export papers for a delivery note, as Excel.
+"""The export papers for a delivery note, as Excel, for the USA or the EU.
 
-Two versions of the same three papers (DAFF's accompanying document for the
-phyto inspection, the consignment note and PPECB's litchi inspection findings
-sheet), one row per pallet line:
+The USA gets three papers: DAFF's accompanying document for the phyto
+inspection, the consignment note and PPECB's litchi inspection findings
+sheet. The EU gets the same but no phyto document. One row per pallet line,
+in two versions:
 - forms(): drawn as the farm's paper forms ("Lw 2290 #41"), one style
   throughout, A4 portrait, the Phyto form on one page;
 - simple(): the same data as plain tables.
@@ -40,7 +41,7 @@ def _count(pack: str) -> str:
     return next((w for w in pack.upper().replace(",", " ").split() if w in SIZES), "")
 
 
-def usa_rows(pallets: list) -> list:
+def export_rows(pallets: list) -> list:
     rows = []
     for p in pallets:
         for ln in p["lines"]:
@@ -51,15 +52,15 @@ def usa_rows(pallets: list) -> list:
     return rows
 
 
-def _facts(n, target: str):
+def _facts(n, target: str, market: str):
     pallets = json.loads(n.pallets or "[]")
-    rows = usa_rows(pallets)
+    rows = export_rows(pallets)
     return {"rows": rows, "doc_no": f"LW {n.note_no}", "pallets": len(pallets),
             "cartons": sum(r["cartons"] for r in rows),
             "day": date.fromisoformat(n.loaded_on).strftime("%d/%m/%Y") if n.loaded_on else "",
             "varieties": ", ".join(sorted({r["variety"] for r in rows if r["variety"]})),
             "receiver": [line for line in n.receiver.split("\n") if line.strip()][:7],
-            "target": target.strip()}
+            "target": target.strip(), "market": market}
 
 
 def _bytes(wb) -> bytes:
@@ -220,7 +221,7 @@ def _consignment(wb, f):
     _put(ws, "I3:K3", "Consignment", "head")
     sender = [(line, None) for line in SENDER] + [("PUC code", PUC), ("PHC code", PHC), ("GGN", f"{GGN} (GlobalG.A.P.)")]
     codes = [("Consignment nr", f["doc_no"]), ("Date", f["day"]), ("Inspection point", INSPECTION_POINT),
-             ("Target market", "USA")]
+             ("Target market", f["market"])]
     for i, (a, b) in enumerate(sender):
         r = 4 + i
         if b is None:
@@ -306,7 +307,7 @@ def _inspection(wb, f):
     for k, x in enumerate(f["rows"]):
         r = head + 1 + k
         for i in range(5 + len(FINDINGS)):
-            _put(ws, f"{chr(65 + i)}{r}", {0: x["pallet_id"], 2: 1, 3: "USA"}.get(i, ""), "cell")
+            _put(ws, f"{chr(65 + i)}{r}", {0: x["pallet_id"], 2: 1, 3: f["market"]}.get(i, ""), "cell")
         ws.row_dimensions[r].height = 20
 
     r = head + len(f["rows"]) + 2
@@ -331,23 +332,25 @@ def _inspection(wb, f):
     ws.row_dimensions[r + 1].height = 60
 
 
-def forms(n, target: str = "") -> bytes:
-    """The three papers drawn as the farm's forms; target is Settings' target receiver."""
-    f = _facts(n, target)
+def forms(n, target: str = "", market: str = "USA") -> bytes:
+    """The papers drawn as the farm's forms; target is Settings' target receiver for the market."""
+    f = _facts(n, target, market)
     wb = Workbook()
     wb.remove(wb.active)
-    _phyto(wb, f)
+    if market == "USA":  # the EU has no phyto document
+        _phyto(wb, f)
     _consignment(wb, f)
     _inspection(wb, f)
     return _bytes(wb)
 
 
-def simple(n, target: str = "") -> bytes:
+def simple(n, target: str = "", market: str = "USA") -> bytes:
     """The same papers as plain tables, one row per pallet line."""
-    f = _facts(n, target)
+    f = _facts(n, target, market)
     rows, doc_no, day, cartons = f["rows"], f["doc_no"], f["day"], f["cartons"]
     bold = Font(bold=True)
     wb = Workbook()
+    wb.remove(wb.active)
 
     def sheet(ws, title, head, body, widths):
         ws.title = title
@@ -367,20 +370,21 @@ def simple(n, target: str = "") -> bytes:
         ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
         ws.sheet_properties.pageSetUpPr.fitToPage = True
 
-    sheet(wb.active, "Phyto", [
-        ["ACCOMPANYING DOCUMENT FOR PHYTOSANITARY INSPECTIONS FOR FRESH FRUIT"],
-        ["Document No / Series No", doc_no, "", "Inspection Date", day],
-        ["Commodity", "Litchis", "", "Importing Country", "USA"],
-        ["Exporting Company & contact details", ", ".join(EXPORTER)],
-        ["Producer's Address", ", ".join(PRODUCER)],
-        ["Magisterial District", PRODUCER[-1], "", "Inspection Depot", INSPECTION_POINT],
-        ["Packhouse Code", PHC, "", "Packhouse Person's Contact Details", PACKHOUSE_CONTACT],
-        ["Intake Document No.", doc_no, "", "PUCs", PUC, "Total Cartons", cartons, "Total Pallets", f["pallets"]],
-    ], [["#", "Pallet ID", "PUC", "Variety", "Block No", "Carton Quantity", "Date code", "Count", "Pallet Nr"]]
-       + [[i + 1, r["pallet_id"], PUC, r["variety"], r["block"], r["cartons"], r["date_code"], r["count"], r["pallet_no"]]
-          for i, r in enumerate(rows)]
-       + [[], ["", "Results of Inspection"], ["", "Signature of DAFF Inspector:"], ["", "Signature of foreign Inspector:"]],
-          [5, 22, 9, 26, 10, 15, 10, 8, 14])
+    if market == "USA":  # the EU has no phyto document
+        sheet(wb.create_sheet(), "Phyto", [
+            ["ACCOMPANYING DOCUMENT FOR PHYTOSANITARY INSPECTIONS FOR FRESH FRUIT"],
+            ["Document No / Series No", doc_no, "", "Inspection Date", day],
+            ["Commodity", "Litchis", "", "Importing Country", "USA"],
+            ["Exporting Company & contact details", ", ".join(EXPORTER)],
+            ["Producer's Address", ", ".join(PRODUCER)],
+            ["Magisterial District", PRODUCER[-1], "", "Inspection Depot", INSPECTION_POINT],
+            ["Packhouse Code", PHC, "", "Packhouse Person's Contact Details", PACKHOUSE_CONTACT],
+            ["Intake Document No.", doc_no, "", "PUCs", PUC, "Total Cartons", cartons, "Total Pallets", f["pallets"]],
+        ], [["#", "Pallet ID", "PUC", "Variety", "Block No", "Carton Quantity", "Date code", "Count", "Pallet Nr"]]
+           + [[i + 1, r["pallet_id"], PUC, r["variety"], r["block"], r["cartons"], r["date_code"], r["count"], r["pallet_no"]]
+              for i, r in enumerate(rows)]
+           + [[], ["", "Results of Inspection"], ["", "Signature of DAFF Inspector:"], ["", "Signature of foreign Inspector:"]],
+              [5, 22, 9, 26, 10, 15, 10, 8, 14])
 
     sheet(wb.create_sheet(), "Consignment", [
         ["CONSIGNMENT NOTE", "", "", "", "", "Consignment nr:", doc_no],
@@ -389,7 +393,7 @@ def simple(n, target: str = "") -> bytes:
         ["Date:", day, "", "", "", "GGN Nr:", GGN],
         ["", "", "", "", "", "GlobalG.A.P. Certified"],
         ["", "", "", "", "", "Inspection point nr:", INSPECTION_POINT],
-        ["", "", "", "", "", "Target market:", "USA"],
+        ["", "", "", "", "", "Target market:", f["market"]],
         ["", "", "", "", "", "Target receiver:", ", ".join(f["target"].split("\n"))],
     ], [["#", "Pallet nr", "Pallet Id", "Start date", "Commodity", "Variety", "Grade", "Count", "Block nr", "Package type", "Units"]]
        + [[i + 1, r["pallet_no"], r["pallet_id"], r["date_code"], "Litchis", r["variety"], "Class 1", r["count"],
@@ -405,7 +409,7 @@ def simple(n, target: str = "") -> bytes:
         ["Signature:", "", "Insp. point:", INSPECTION_POINT, "Date:", day],
         ["Cultivar:", f["varieties"], "Product:", "Litchis", "Consignment note numbers:", doc_no],
     ], [["Pallet barcode ID", "Net mass", "Class", "Target market"] + FINDINGS + ["C - Comply / R - Rejected"]]
-       + [[r["pallet_id"], "", 1, "USA"] for r in rows]
+       + [[r["pallet_id"], "", 1, f["market"]] for r in rows]
        + [[], ["Passed for Export Stickers:", "From:", "", "To:"], ["Remarks:"]],
           [22, 9, 6, 10] + [9] * len(FINDINGS) + [12])
     return _bytes(wb)

@@ -157,14 +157,31 @@ def test_usa_forms_keep_phyto_on_one_page_and_print_the_target_receiver():
 
     from openpyxl import load_workbook
 
-    import usa_forms
+    import export_forms
     from models import DeliveryNote
     line = {"cartons": 192, "packaging_name": "Rhino 4.5 kg XL", "carton_kg": 4.5}
     n = DeliveryNote(uuid="x", note_no=7, created_at=datetime.now(), loaded_on="2026-10-26", receiver="AgriLink",
                      pallets=_json.dumps([{"pallet_ref": str(k), "barcode": "", "date_code": "", "lines": [line]} for k in range(27)]))
-    wb = load_workbook(BytesIO(usa_forms.forms(n, "Seasons Farm Fresh\nToronto")))
+    wb = load_workbook(BytesIO(export_forms.forms(n, "Seasons Farm Fresh\nToronto")))
     p = wb["Phyto"]
     assert wb.sheetnames == ["Phyto", "Consignment", "Inspection Sheet"]
     assert (p["A45"].value, p.page_setup.fitToHeight) == (27, 1)
     c = wb["Consignment"]
     assert (c["J8"].value, c["A8"].value, c["C10"].value) == ("Seasons Farm Fresh\nToronto", "PUC code", "4050373828202 (GlobalG.A.P.)")
+
+
+def test_eu_papers_have_no_phyto_and_their_own_target_receiver(client, admin_client, pallets):
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+    sync(client, note(pallets=("p1", "p2")))
+    admin_client.put("/api/settings/deliverynote", json={"cooled_to": 8, "target_receiver": "Seasons",
+                                                         "eu_target_receiver": "Rotterdam Fresh"})
+    wb = load_workbook(BytesIO(client.get("/api/deliverynote/n1/eu_forms.xlsx").content))
+    assert wb.sheetnames == ["Consignment", "Inspection Sheet"]
+    c, ins = wb["Consignment"], wb["Inspection Sheet"]
+    assert (c["J7"].value, c["J8"].value, ins["D10"].value) == ("EU", "Rotterdam Fresh", "EU")
+    simple = load_workbook(BytesIO(client.get("/api/deliverynote/n1/eu.xlsx").content))
+    assert simple.sheetnames == ["Consignment", "Inspection Sheet"]
+    assert load_workbook(BytesIO(client.get("/api/deliverynote/n1/usa_forms.xlsx").content))["Consignment"]["J8"].value == "Seasons"
+    assert client.get("/api/deliverynote/n1/uk_forms.xlsx").status_code == 404

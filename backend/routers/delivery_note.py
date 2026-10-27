@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlmodel import Session, SQLModel, func, select
 
-import usa_forms
+import export_forms
 from db import get_packhouse_session
 from models import DeliveryNote, DeliveryNoteSettings, Pallet, Receiver, Transporter
 from routers.sulfur import _iso, _now, _utc_naive
@@ -171,6 +171,7 @@ def options(session: Session = Depends(get_packhouse_session)):
     return {"transporters": active(Transporter), "receivers": active(Receiver),
             "cooled_to": settings.cooled_to if settings else 8.0,
             "target_receiver": settings.target_receiver if settings else "",
+            "eu_target_receiver": settings.eu_target_receiver if settings else "",
             "last_no": (settings.last_no if settings and settings.last_no
                         else session.exec(select(func.max(DeliveryNote.note_no))).one())}
 
@@ -390,20 +391,30 @@ def _live(uuid: str, session: Session) -> DeliveryNote:
     return n
 
 
-def _target(session: Session) -> str:
+# The export markets with papers (export_forms.py): its name on them, and the
+# Settings field holding its target receiver.
+MARKETS = {"usa": ("USA", "target_receiver"), "eu": ("EU", "eu_target_receiver")}
+
+
+def _export(market: str, session: Session):
+    if market not in MARKETS:
+        raise HTTPException(404, "No papers for that market")
+    name, field = MARKETS[market]
     settings = session.get(DeliveryNoteSettings, 1)
-    return settings.target_receiver if settings else ""
+    return name, getattr(settings, field) if settings else ""
 
 
-@router.get("/{uuid}/usa_forms.xlsx")
-def note_usa_forms(uuid: str, session: Session = Depends(get_packhouse_session)):
-    """The note's pallets on the USA export papers, drawn as the farm's forms (usa_forms.py)."""
+@router.get("/{uuid}/{market}_forms.xlsx")
+def note_export_forms(uuid: str, market: str, session: Session = Depends(get_packhouse_session)):
+    """The note's pallets on the market's export papers, drawn as the farm's forms."""
     n = _live(uuid, session)
-    return _xlsx(usa_forms.forms(n, _target(session)), f"usa_forms_{n.note_no}.xlsx")
+    name, target = _export(market, session)
+    return _xlsx(export_forms.forms(n, target, name), f"{market}_forms_{n.note_no}.xlsx")
 
 
-@router.get("/{uuid}/usa.xlsx")
-def note_usa(uuid: str, session: Session = Depends(get_packhouse_session)):
+@router.get("/{uuid}/{market}.xlsx")
+def note_export(uuid: str, market: str, session: Session = Depends(get_packhouse_session)):
     """The same papers as plain tables."""
     n = _live(uuid, session)
-    return _xlsx(usa_forms.simple(n, _target(session)), f"usa_{n.note_no}.xlsx")
+    name, target = _export(market, session)
+    return _xlsx(export_forms.simple(n, target, name), f"{market}_{n.note_no}.xlsx")

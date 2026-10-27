@@ -34,6 +34,7 @@ class DeliverySettingsIn(SQLModel):
     cooled_to: float
     last_no: Optional[int] = None
     target_receiver: str = ""
+    eu_target_receiver: str = ""
 
 
 def _delete(session: Session, model, column, row_id: int):
@@ -96,7 +97,8 @@ def save_delivery_settings(body: DeliverySettingsIn, session: Session = Depends(
     if body.last_no is not None and body.last_no < 1:
         raise HTTPException(422, "The last note number is a whole number from 1")
     row = session.get(DeliveryNoteSettings, 1) or DeliveryNoteSettings(id=1)
-    row.cooled_to, row.last_no, row.target_receiver = body.cooled_to, body.last_no, body.target_receiver.strip()
+    row.cooled_to, row.last_no = body.cooled_to, body.last_no
+    row.target_receiver, row.eu_target_receiver = body.target_receiver.strip(), body.eu_target_receiver.strip()
     session.add(row)
     session.commit()
     session.refresh(row)
