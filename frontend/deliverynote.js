@@ -16,6 +16,7 @@
 
 let dn = { view: "list", draft: null };
 let sealScanner = null;
+let sealConfirm = null; // twiceInARow (consignment.js)
 
 const dnToday = () => new Date(Store.now()).toLocaleDateString("en-CA"); // YYYY-MM-DD, farm-local
 const dnDay = (v) => (v ? v.split("-").reverse().join("/") : "");
@@ -158,8 +159,9 @@ function noteForm() {
       ${locked && locked !== "local" ? label(`Target receiver (${groupTitle(locked)})`,
           select("target_receiver", targetChoices(d, locked), d.target_receiver_id, "Target receiver...", (t) => (t.text || targetText(t)).split("\n").join(" · "))) : ""}
       <div class="flex gap-2">
-        ${label("Seal no", `<span class="flex gap-2">${input("seal_no", `placeholder="Scan or type"`)}
-          <button type="button" data-scanseal title="Scan the seal's barcode" class="px-3 rounded-lg border border-slate-300"><i class="fa-solid fa-barcode text-xl"></i></button></span>`, "flex-1 min-w-0")}
+        <div class="flex-1 min-w-0"><span class="text-xs font-semibold text-slate-600">Seal no</span>
+          <div class="flex gap-2">${input("seal_no", `placeholder="Scan or type" aria-label="Seal no"`)}
+          <button type="button" data-scanseal title="Scan the seal's barcode" class="px-3 rounded-lg border border-slate-300"><i class="fa-solid fa-barcode text-xl"></i></button></div></div>
         ${label("Cooled to (°C)", input("cooled_to", `inputmode="decimal" maxlength="5"`), "w-28 shrink-0")}
       </div>
       <div id="sealReader" class="hidden w-full rounded-lg overflow-hidden bg-black min-h-[200px]"></div>
@@ -195,6 +197,7 @@ async function startSealScan() {
   if (!window.isSecureContext) { msg.textContent = "Scanning needs the secure https://...ts.net:8060/ address - check Tailscale is connected, or type the number."; return; }
   if (sealScanner) return;
   msg.textContent = "";
+  sealConfirm = twiceInARow();
   $("sealReader").classList.remove("hidden");
   const F = Html5QrcodeSupportedFormats;
   sealScanner = new Html5Qrcode("sealReader", { formatsToSupport: [F.CODE_128, F.CODE_39, F.ITF, F.EAN_13, F.QR_CODE], verbose: false });
@@ -217,6 +220,7 @@ function stopSealScan() {
 
 function onSealCode(text) {
   if (!sealScanner) return; // the camera reports a code many times a second
+  if (!sealConfirm(text.trim())) return;
   stopSealScan();
   Boord.beepScanned();
   dn.draft.seal_no = text.trim();

@@ -15,6 +15,15 @@
 
 let cn = { view: "list", draft: null };
 let palletScanner = null;
+let palletConfirm = null;
+
+// A barcode is taken only once the camera reads the same code twice in a row:
+// a single read can be noise (ITF and EAN in particular "find" a number in any
+// stripes), and it closed the camera at once with a wrong code.
+function twiceInARow() {
+  let last = null;
+  return (text) => { const same = text === last; last = text; return same; };
+}
 
 // The pallet number is typed once and then runs on: 001, 002... (or from 100).
 // Unique for the season (the calendar year it was scanned in) across every stack.
@@ -227,9 +236,9 @@ function palletForm() {
     </div>
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
       <div id="palletReader" class="hidden w-full rounded-lg overflow-hidden bg-black min-h-[200px]"></div>
-      <label class="block"><span class="text-xs font-semibold text-slate-600">Barcode</span>
-        <span class="flex gap-2"><input data-field="barcode" value="${esc(d.barcode)}" inputmode="numeric" placeholder="Scan the pallet label (optional)" class="flex-1 min-w-0 ${field}">
-        <button type="button" data-scan class="px-3 rounded-lg border border-slate-300"><i class="fa-solid fa-barcode text-xl"></i></button></span></label>
+      <div><span class="text-xs font-semibold text-slate-600">Barcode</span>
+        <div class="flex gap-2"><input data-field="barcode" value="${esc(d.barcode)}" inputmode="numeric" placeholder="Scan the pallet label (optional)" aria-label="Barcode" class="flex-1 min-w-0 ${field}">
+        <button type="button" data-scan title="Scan the pallet label" class="px-3 rounded-lg border border-slate-300"><i class="fa-solid fa-barcode text-xl"></i></button></div></div>
       <div class="flex gap-2">
         <label class="w-16 shrink-0"><span class="text-xs font-semibold text-slate-600">Pallet no</span>
           <input data-field="ref" value="${esc(d.ref)}" inputmode="numeric" maxlength="3" pattern="[0-9]{3}" placeholder="001" class="w-full ${field}"></label>
@@ -261,6 +270,7 @@ async function startPalletScan() {
   if (!window.isSecureContext) { msg.textContent = "Scanning needs the secure https://...ts.net:8060/ address - check Tailscale is connected, or type the code."; return; }
   if (palletScanner) return;
   msg.textContent = "";
+  palletConfirm = twiceInARow();
   $("palletReader").classList.remove("hidden");
   const F = Html5QrcodeSupportedFormats;
   palletScanner = new Html5Qrcode("palletReader", { formatsToSupport: [F.CODE_128, F.CODE_39, F.ITF, F.EAN_13, F.QR_CODE], verbose: false });
@@ -287,6 +297,7 @@ const palletWithCode = (code, uuid) => Store.pallets().find((p) => p.barcode ===
 function onPalletCode(text) {
   if (!palletScanner) return; // the camera reports a code many times a second
   const code = text.trim();
+  if (!palletConfirm(code)) return;
   const other = palletWithCode(code, cn.draft.uuid);
   if (other) {
     Boord._tone(220, 0.35);
@@ -356,7 +367,7 @@ function onConsignmentClick(ev) {
   if (t.dataset.pallet) openPallet(Store.pallets().find((p) => p.uuid === t.dataset.pallet));
   else if ("add" in t.dataset) openPallet(null);
   else if ("cancel" in t.dataset) { cn.view = "list"; renderConsignment(); }
-  else if ("scan" in t.dataset) startPalletScan();
+  else if ("scan" in t.dataset) (palletScanner ? stopPalletScan() : startPalletScan());
   else if ("addline" in t.dataset) {
     // A new line starts with the carton type and block of the one above.
     const above = d.lines[d.lines.length - 1] || {};
