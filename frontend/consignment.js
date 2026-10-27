@@ -41,13 +41,19 @@ function renderConsignment() {
 // Today's pallets (this phone's day), and any refused one whatever its day, so it is never lost.
 const sameDay = (iso) => new Date(iso).toDateString() === new Date(Store.now()).toDateString();
 
+// Under a heading per market group (USA, EU, Local), newest first within each.
 function palletsView() {
   const pallets = newestFirst().filter((p) => sameDay(p.scanned_at) || p.error);
-  const rows = pallets.map((p) => `
+  const rows = MARKET_GROUPS.map(([key, title]) => {
+    const group = pallets.filter((p) => marketGroup(p.market_name) === key);
+    if (!group.length) return "";
+    return groupHead(title, `${group.length} pallet${group.length === 1 ? "" : "s"} · ${sum(group, palletCartons)} cartons · ${kgText(sum(group, palletKg))}`)
+      + group.map((p) => `
     <button type="button" data-pallet="${esc(p.uuid)}" class="w-full text-left border-t py-2 active:bg-slate-50">
       ${palletSummary(p)}
       ${p.error ? `<div class="text-sm text-red-600 mt-1">Not saved: ${esc(p.error)}. Tap to fix it.</div>` : ""}
     </button>`).join("");
+  }).join("");
   return `
     <div class="bg-white rounded-2xl shadow p-4">
       <button type="button" data-add class="w-full boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-barcode"></i> Add a new pallet</button>
@@ -61,6 +67,25 @@ function palletsView() {
       ${rows || `<div class="text-center text-slate-400 text-sm py-6 border-t">No pallets yet today</div>`}
     </div>`;
 }
+
+// A pallet's market group: usa or eu by the word in its market name, else
+// local. Pallet Stack lists pallets by group, and a delivery note holds one
+// group (deliverynote.js; export_forms.market_group checks it on the server).
+const EXPORT_MARKETS = [["usa", "USA", /\busa\b/i], ["eu", "EU", /\beu\b/i]];
+const MARKET_GROUPS = [["usa", "USA"], ["eu", "EU"], ["local", "Local"]];
+function marketGroup(name) {
+  const hit = EXPORT_MARKETS.find(([, , re]) => re.test(name || ""));
+  return hit ? hit[0] : "local";
+}
+const groupTitle = (key) => MARKET_GROUPS.find(([k]) => k === key)[1];
+
+// The heading between market groups in a list: the group's name, a note on
+// the right (its count; why it can't be picked), greyed when dim.
+const groupHead = (title, right, dim) => `
+    <div class="border-t-2 border-slate-300 pt-3 pb-1 flex justify-between items-baseline gap-3 ${dim ? "opacity-40" : ""}">
+      <div class="text-lg font-bold">${title}</div>
+      <div class="text-sm text-slate-500 text-right">${right}</div>
+    </div>`;
 
 // The head of a list card (Pallets added today; a delivery note's pallets): a
 // dark blue band across the card's top, so the totals stand out from the rows.
