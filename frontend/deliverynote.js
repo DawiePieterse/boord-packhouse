@@ -179,8 +179,9 @@ function noteForm() {
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
       <div id="noteMsg" class="text-sm text-red-600 empty:hidden">${d.note && d.note.error ? `Not saved: ${esc(d.note.error)}.` : ""}</div>
       <button type="button" data-savenote class="w-full boord-btn-primary rounded-xl py-4 text-lg font-bold">Save delivery note</button>
-      ${d.note ? `<button type="button" data-pdf class="w-full border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-share-from-square"></i> Print or share</button>
-                  ${exportButtons(d.note)}
+      ${d.note ? `${noteGroup(d.note) === "local" /* local: the Bekfontein delivery note; export: the market's spreadsheet instead */
+                    ? `<button type="button" data-pdf class="w-full border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-share-from-square"></i> Print or share</button>`
+                    : exportButtons(d.note)}
                   <button type="button" data-removenote class="w-full border border-red-300 text-red-700 rounded-xl py-3 font-semibold">Delete delivery note</button>` : ""}
     </div>`;
 }
@@ -259,9 +260,9 @@ async function removeNote() {
   renderDeliveryNote();
 }
 
-// A note with export pallets has their market's papers (USA: phyto,
+// A note of export pallets has their market's papers (USA: phyto,
 // consignment and PPECB sheet; EU: the same but no phyto), drawn as the
-// farm's forms. The market is read off the pallets' market names (USA Sea
+// farm's forms, in place of the Bekfontein delivery note a local note prints. The market is read off the pallets' market names (USA Sea
 // Freight, EU Air Freight).
 const EXPORT_MARKETS = [["usa", "USA", /\busa\b/i], ["eu", "EU", /\beu\b/i]];
 
@@ -289,7 +290,7 @@ function noteLabel(n) { return `${notePrefix(n.pallets)}-${n.note_no}`; }
 function exportButtons(note) {
   const markets = (note.pallets || []).map((p) => p.market_name || "");
   return EXPORT_MARKETS.filter(([, , re]) => markets.some((m) => re.test(m))).map(([key, label]) =>
-    `<button type="button" data-export="${key}_forms" class="w-full border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-file-excel"></i> ${label} forms</button>`).join("");
+    `<button type="button" data-export="${key}_forms" class="w-full border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-file-excel"></i> Print or share ${label} documents</button>`).join("");
 }
 
 // The server makes the PDF, so the note must have reached it: a copy still

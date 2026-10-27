@@ -70,11 +70,13 @@ def test_bad_notes_are_rejected_not_stored(client, pallets, bad):
     assert notes(client) == []
 
 
-def test_pdf_is_the_paper_note(client, pallets):
-    sync(client, note(pallets=("p1", "p2"), cooled_to="8"))
+def test_pdf_is_the_paper_note_for_local_notes_only(client, pallets):
+    sync_pallets(client, pallets=[pallet("p3", barcode="B3", market_id=5, market_name="Local")])
+    sync(client, note(pallets=("p3",), cooled_to="8"), note("n2", 1336, pallets=("p1", "p2")))
     r = client.get("/api/deliverynote/n1/pdf")
     assert r.status_code == 200 and r.content.startswith(b"%PDF")
-    assert "afleweringsnota_LW-1335.pdf" in r.headers["content-disposition"]  # USA pallets: LW
+    assert "afleweringsnota_B-1335.pdf" in r.headers["content-disposition"]
+    assert client.get("/api/deliverynote/n2/pdf").status_code == 409  # USA pallets: their papers instead
     assert client.get("/api/deliverynote/nope/pdf").status_code == 404
 
 

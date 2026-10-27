@@ -370,10 +370,13 @@ def _draw(n: DeliveryNote, pages: int):
 
 @router.get("/{uuid}/pdf")
 def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
-    """The note as the paper Afleweringsnota, on A4, signature lines blank."""
+    """The note as the paper Afleweringsnota, on A4, signature lines blank.
+    Only a local note has one: an export note goes out on its market's papers."""
     n = session.get(DeliveryNote, uuid)
     if n is None or n.removed:
         raise HTTPException(404, "No such delivery note")
+    if export_forms.note_label(n).startswith("LW"):
+        raise HTTPException(409, "An export note goes out on its market's documents, not the delivery note")
     pdf = _draw(n, _draw(n, 1).page_no())
     name = f"afleweringsnota_{export_forms.note_label(n)}.pdf"
     return Response(bytes(pdf.output()), media_type="application/pdf",
