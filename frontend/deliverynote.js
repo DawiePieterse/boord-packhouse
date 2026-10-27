@@ -106,13 +106,25 @@ function noteForm() {
     + rows.map((r) => `<option value="${esc(r.id)}"${r.id === picked ? " selected" : ""}>${esc(text(r))}</option>`).join("") + `</select>`;
   const choices = palletChoices(d);
   const picked = choices.filter((p) => d.picked.includes(p.uuid));
-  const pallets = choices.map((p) => {
-    const on = d.picked.includes(p.uuid);
+  // The pallets in their market groups; once one is ticked the other groups
+  // can't be (a delivery is all USA, all EU or all local).
+  const locked = picked.length ? marketGroup(picked[0].market_name) : null;
+  const pallets = MARKET_GROUPS.map(([key, title]) => {
+    const group = choices.filter((p) => marketGroup(p.market_name) === key);
+    if (!group.length) return "";
+    const off = locked && locked !== key;
     return `
-    <button type="button" data-pick="${esc(p.uuid)}" class="w-full text-left flex gap-3 border-t py-2 ${on ? "bg-blue-50" : "active:bg-slate-50"}">
+    <div class="border-t-2 border-slate-300 pt-3 pb-1 flex justify-between items-baseline ${off ? "opacity-40" : ""}">
+      <div class="text-lg font-bold">${title}</div>
+      <div class="text-sm text-slate-500">${off ? `Not with ${groupTitle(locked)} pallets` : `${group.length} pallet${group.length === 1 ? "" : "s"}`}</div>
+    </div>` + group.map((p) => {
+      const on = d.picked.includes(p.uuid);
+      return `
+    <button type="button" data-pick="${esc(p.uuid)}" ${off ? "disabled" : ""} class="w-full text-left flex gap-3 border-t py-2 ${on ? "bg-blue-50" : off ? "opacity-40" : "active:bg-slate-50"}">
       <i class="fa-${on ? "solid fa-square-check text-blue-700" : "regular fa-square text-slate-400"} text-2xl pt-1"></i>
       <div class="flex-1 min-w-0">${palletSummary(p)}</div>
     </button>`;
+    }).join("");
   }).join("");
   return `
     <div class="flex items-center gap-3">
@@ -141,7 +153,7 @@ function noteForm() {
       <div class="${LIST_HEAD}">
         <div class="text-lg font-bold">Pallets in this delivery</div>
         <div id="noteTotals" class="text-base">${noteTotals(picked)}</div>
-        <div class="text-xs text-white/80">Tick the pallets from Pallet Stack that go in this delivery.</div>
+        <div class="text-xs text-white/80">Tick the pallets from Pallet Stack that go in this delivery: all USA, all EU or all local.</div>
       </div>
       ${pallets || `<div class="text-center text-slate-400 text-sm py-6 border-t">No pallets left to send</div>`}
     </div>
@@ -205,6 +217,7 @@ async function saveNote() {
   if (!transporter) return fail("Pick the transporter.");
   if (!d.loaded_on) return fail("Pick the loading date.");
   if (!pallets.length) return fail("Tick the pallets in this delivery.");
+  if (new Set(pallets.map((p) => marketGroup(p.market_name))).size > 1) return fail("Untick the pallets of the other market: a delivery is all USA, all EU or all local.");
   const op = Operator.current() || {};
   const base = d.note || { kind: "delivery_note", created_at: new Date(Store.now()).toISOString(),
                            made_by: op.id || "", made_by_name: op.name || "" };
@@ -233,10 +246,19 @@ async function removeNote() {
 // Freight, EU Air Freight).
 const EXPORT_MARKETS = [["usa", "USA", /\busa\b/i], ["eu", "EU", /\beu\b/i]];
 
-// The note number's prefix: LW for a delivery with export (USA or EU)
+// A pallet's market group: usa or eu by its market name, else local. A note
+// holds one group (export_forms.market_group checks it on the server).
+const MARKET_GROUPS = [["usa", "USA"], ["eu", "EU"], ["local", "Local"]];
+function marketGroup(name) {
+  const hit = EXPORT_MARKETS.find(([, , re]) => re.test(name || ""));
+  return hit ? hit[0] : "local";
+}
+const groupTitle = (key) => MARKET_GROUPS.find(([k]) => k === key)[1];
+
+// The note number's prefix: LW for a delivery of export (USA or EU)
 // pallets, B for local. One series of numbers, as export_forms.note_label.
 function notePrefix(pallets) {
-  return (pallets || []).some((p) => EXPORT_MARKETS.some(([, , re]) => re.test(p.market_name || ""))) ? "LW" : "B";
+  return (pallets || []).some((p) => marketGroup(p.market_name) !== "local") ? "LW" : "B";
 }
 
 function noteLabel(n) { return `${notePrefix(n.pallets)}-${n.note_no}`; }
@@ -276,6 +298,7 @@ function onDeliveryClick(ev) {
   else if ("back" in t.dataset) { dn.view = "list"; renderDeliveryNote(); }
   else if (t.dataset.pick) {
     const u = t.dataset.pick;
+    if (t.disabled) return; // another market's pallet
     d.picked = d.picked.includes(u) ? d.picked.filter((x) => x !== u) : [...d.picked, u];
     const y = window.scrollY;
     renderDeliveryNote();

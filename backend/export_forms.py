@@ -40,6 +40,13 @@ FINDINGS = ["Decay", "Torn out stems", "Injuries", "Blemishes", "Sooty mould", "
 EXPORT_MARKET = re.compile(r"\b(usa|eu)\b", re.I)  # a pallet's market name that makes it export
 
 
+def market_group(name: str) -> str:
+    """A pallet's market group: usa or eu by its market name, else local. A
+    delivery note holds pallets of one group."""
+    hit = EXPORT_MARKET.search(name or "")
+    return hit.group(1).lower() if hit else "local"
+
+
 def note_label(n) -> str:
     """The note's number as printed: LW-1335 when it carries export (USA or EU)
     pallets, else B-1335 (local). One series of numbers; only the prefix differs."""

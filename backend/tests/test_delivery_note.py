@@ -184,3 +184,11 @@ def test_the_number_is_b_for_local_and_lw_for_export():
                                        pallets=_json.dumps([{"market_name": m} for m in markets])))
     assert (label("Local"), label("USA Sea Freight"), label("EU Air Freight"), label("Local", "EU Sea Freight"),
             label("Europe")) == ("B-1335", "LW-1335", "LW-1335", "LW-1335", "B-1335")
+
+
+def test_a_note_does_not_mix_markets(client, pallets):
+    from export_forms import market_group
+    sync_pallets(client, pallets=[pallet("p3", barcode="B3", market_id=5, market_name="Local")])
+    assert sync(client, note(pallets=("p1", "p3")))["rejected"][0]["error"] == "a note is all USA, all EU or all local pallets"
+    assert sync(client, note(pallets=("p1", "p2")))["synced"] == ["n1"]
+    assert [market_group(m) for m in ("USA Air Freight", "EU Sea Freight", "Local", "")] == ["usa", "eu", "local", "local"]

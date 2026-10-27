@@ -88,6 +88,8 @@ def _note_problem(rec: NoteIn, session: Session) -> Optional[str]:
         p = session.get(Pallet, uuid)
         if p is None or p.removed:
             return "a pallet on it is not on the server (yet), or was deleted"
+    if len({export_forms.market_group(session.get(Pallet, u).market_name) for u in uuids}) > 1:
+        return "a note is all USA, all EU or all local pallets"
     # ponytail: scans every live note; a JSON column, fine for a farm's season of notes
     others = session.exec(select(DeliveryNote).where(DeliveryNote.uuid != rec.uuid, DeliveryNote.removed == False)).all()  # noqa: E712
     for other in others:
