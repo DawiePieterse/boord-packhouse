@@ -16,6 +16,8 @@ from datetime import date
 from pathlib import Path
 
 from openpyxl import Workbook
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
 from openpyxl.drawing.image import Image
 from openpyxl.drawing.fill import Blip
 from openpyxl.drawing.geometry import Point2D, PositiveSize2D, PresetGeometry2D, Transform2D
@@ -83,6 +85,17 @@ KINDS = {  # font, fill, horizontal alignment
     "cell": (Font(name="Arial", size=10), None, "center"),
     "hint": (Font(name="Arial", size=8, italic=True, color="808080"), None, "center"),
 }
+
+
+BOX_FONT, ITEM_FONT = InlineFont(rFont="Arial", sz=16), InlineFont(rFont="Arial", sz=10)
+
+
+def _boxes(items: list) -> CellRichText:
+    """Tick boxes to mark by hand, each box drawn bigger than its words."""
+    blocks = []
+    for i, item in enumerate(items):
+        blocks += [TextBlock(BOX_FONT, ("    " if i else "") + "\u2610"), TextBlock(ITEM_FONT, " " + item)]
+    return CellRichText(blocks)
 
 
 def _put(ws, ref, value=None, kind="value", box=True, rotate=0, top=False):
@@ -285,7 +298,8 @@ def _inspection(wb, f):
     _heights(ws, (1, 2), 22)
     _put(ws, "A4", "Mark the option (√)", "label")
     for ref, option in (("B4:E4", "Min standard"), ("F4:J4", "Template"), ("K4:O4", "Special market"), (f"P4:{last}4", "Dispensation")):
-        _put(ws, ref, f"□  {option}", "cell")
+        _put(ws, ref, _boxes([option]), "cell")
+    ws.row_dimensions[4].height = 24
     pairs = [[("Inspector and no", ""), ("Exporter", EXPORTER[0]), ("PHC", PHC), ("PUC", PUC)],
              [("Signature", ""), ("Insp. point", INSPECTION_POINT), ("Date", f["day"]), ("Product", "Litchis")],
              [("Consignment note nr", f["doc_no"]), ("Cultivar", f["varieties"]), ("", ""), ("", "")]]
@@ -318,8 +332,10 @@ def _inspection(wb, f):
               ("Packing requirements", "Pre-pack, Same cultivar, Same size, Same quality, Same ripeness")]
     for i, (label, items) in enumerate(checks):
         _put(ws, f"A{r + i}", label, "label")
-        _put(ws, f"B{r + i}:{last}{r + i}", "   ".join("□ " + x for x in items.split(", ")))
-        ws.row_dimensions[r + i].height = 30 if len(items) > 90 else 20
+        _put(ws, f"B{r + i}:{last}{r + i}", _boxes(items.split(", ")))
+        # ponytail: a character count for the wrap (about 95 to a line across B:S, a box and its gap
+        # about 4), not a measured width
+        ws.row_dimensions[r + i].height = 22 * -(-sum(len(x) + 4 for x in items.split(", ")) // 95) + 4
     r += len(checks)
     _put(ws, f"A{r}", "Passed for export stickers", "label")
     _put(ws, f"B{r}:C{r}", "From", "label")
