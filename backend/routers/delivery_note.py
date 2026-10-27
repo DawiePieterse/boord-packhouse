@@ -13,6 +13,7 @@ its lines, to print or share on WhatsApp.
 import io
 import json
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -483,3 +484,51 @@ def note_usa(uuid: str, session: Session = Depends(get_packhouse_session)):
     wb.save(out)
     return Response(out.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="usa_{n.note_no}.xlsx"'})
+
+
+# The same papers on the farm's own forms: templates/usa_forms.xlsx is their
+# workbook with what a note fills in blanked out (made once from
+# "Lw 2290 #41"). Its pallet rows are fixed: 13 on Phyto (1), 8 on Phyto (2).
+# openpyxl keeps its pictures but not its drawn boxes (the PPECB stamp box).
+TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "usa_forms.xlsx"
+FORM_ROWS = 21
+
+
+@router.get("/{uuid}/usa_forms.xlsx")
+def note_usa_forms(uuid: str, session: Session = Depends(get_packhouse_session)):
+    """The note's pallets filled into the farm's USA forms, to print as they always were."""
+    from openpyxl import load_workbook
+    n = session.get(DeliveryNote, uuid)
+    if n is None or n.removed:
+        raise HTTPException(404, "No such delivery note")
+    rows, doc_no = _usa_rows(n), f"LW {n.note_no}"
+    if len(rows) > FORM_ROWS:
+        raise HTTPException(422, f"The USA forms hold {FORM_ROWS} pallet lines, this note has {len(rows)}: use the simple Excel")
+    day = date.fromisoformat(n.loaded_on) if n.loaded_on else None
+    cartons, pallets = sum(r["cartons"] for r in rows), len(json.loads(n.pallets or "[]"))
+    varieties = ", ".join(sorted({r["variety"] for r in rows if r["variety"]}))
+    wb = load_workbook(TEMPLATE)
+    p1, p2, c, ins = wb["Phyto (1)"], wb["Phyto (2)"], wb["Consignment 1"], wb["Inspection Sheet"]
+
+    for ws in (p1, p2):
+        ws["C5"], ws["I9"] = doc_no, day
+        ws["H19"], ws["J19"], ws["K19"], ws["L19"] = doc_no, PUC, cartons, pallets
+    for i, r in enumerate(rows):
+        ws, row = (p1, 27 + i) if i < 13 else (p2, 14 + i)
+        for col, v in zip("ABHIJKLMN", (i + 1, r["pallet_id"], PUC, r["variety"], r["block"], r["cartons"],
+                                        r["date_code"], r["count"], r["pallet_no"])):
+            ws[f"{col}{row}"] = v
+        for col, v in zip("ABCDEFGHIJK", (i + 1, r["pallet_no"], r["pallet_id"], r["date_code"], "Litchis", r["variety"],
+                                          "Class 1", r["count"], r["block"], r["pack"], r["cartons"])):
+            c[f"{col}{11 + i}"] = v
+        ins[f"A{14 + 2 * i}"], ins[f"C{14 + 2 * i}"], ins[f"D{15 + 2 * i}"] = r["pallet_id"], 1, "USA"
+
+    c["K2"], c["C6"], c["C33"], c["K32"] = doc_no, day, day, cartons
+    for i, line in enumerate(n.receiver.split("\n")[:6]):
+        c[f"F{2 + i}"] = line
+    ins["E9"], ins["K10"], ins["B12"], ins["C11"] = EXPORTER[0], day, doc_no, f"CULTIVAR:  {varieties}"
+
+    out = io.BytesIO()
+    wb.save(out)
+    return Response(out.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="usa_forms_{n.note_no}.xlsx"'})

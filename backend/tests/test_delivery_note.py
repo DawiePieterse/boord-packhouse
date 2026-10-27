@@ -131,3 +131,17 @@ def test_usa_papers_list_every_pallet_line(client, pallets):
     rows = [row for row in wb["Phyto"].iter_rows(values_only=True) if row[0] in (1, 2)]
     assert [(row[1], row[2], row[8]) for row in rows] == [("060099005963004759", "D2087", "001"), ("B2", "D2087", "002")]
     assert client.get("/api/deliverynote/nope/usa.xlsx").status_code == 404
+
+
+def test_usa_forms_fill_the_farms_own_workbook(client, pallets):
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+    sync(client, note(pallets=("p1", "p2")))
+    r = client.get("/api/deliverynote/n1/usa_forms.xlsx")
+    assert r.status_code == 200 and 'usa_forms_1335.xlsx' in r.headers["content-disposition"]
+    wb = load_workbook(BytesIO(r.content))
+    p1, c, ins = wb["Phyto (1)"], wb["Consignment 1"], wb["Inspection Sheet"]
+    assert (p1["C5"].value, p1["B27"].value, p1["N28"].value, p1["K19"].value) == ("LW 1335", "060099005963004759", "002", 120)
+    assert (c["K2"].value, c["C12"].value, c["F2"].value, c["A13"].value) == ("LW 1335", "B2", "Boeretrust", None)
+    assert (ins["A16"].value, ins["D17"].value) == ("B2", "USA")

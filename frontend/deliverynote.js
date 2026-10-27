@@ -149,7 +149,7 @@ function noteForm() {
       <div id="noteMsg" class="text-sm text-red-600 empty:hidden">${d.note && d.note.error ? `Not saved: ${esc(d.note.error)}.` : ""}</div>
       <button type="button" data-savenote class="w-full boord-btn-primary rounded-xl py-4 text-lg font-bold">Save delivery note</button>
       ${d.note ? `<button type="button" data-pdf class="w-full border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-share-from-square"></i> Print or share</button>
-                  ${(d.note.pallets || []).some((p) => /usa/i.test(p.market_name || "")) ? `<button type="button" data-usa class="w-full border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-file-excel"></i> USA documents</button>` : ""}
+                  ${(d.note.pallets || []).some((p) => /usa/i.test(p.market_name || "")) ? `<div class="grid grid-cols-2 gap-2"><button type="button" data-usa="usa_forms" class="border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-file-excel"></i> USA forms</button><button type="button" data-usa="usa" class="border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-table"></i> USA simple</button></div>` : ""}
                   <button type="button" data-removenote class="w-full border border-red-300 text-red-700 rounded-xl py-3 font-semibold">Delete delivery note</button>` : ""}
     </div>`;
 }
@@ -235,9 +235,10 @@ async function shareNote(usa) {
   if (!n || n.synced === 0) { msg.textContent = "Still sending this note - try again when the pill says synced."; Store.syncNow(); return; }
   msg.textContent = "";
   try {
-    // usa: the USA export papers (phyto, consignment, PPECB sheet) as Excel.
-    const blob = await Boord.api(`/api/deliverynote/${encodeURIComponent(n.uuid)}/${usa ? "usa.xlsx" : "pdf"}`);
-    const name = usa ? `usa_${n.note_no}.xlsx` : `afleweringsnota_${n.note_no}.pdf`;
+    // usa: the USA export papers (phyto, consignment, PPECB sheet) as Excel,
+    // "usa_forms" on the farm's own forms, "usa" as plain tables.
+    const blob = await Boord.api(`/api/deliverynote/${encodeURIComponent(n.uuid)}/${usa ? usa + ".xlsx" : "pdf"}`);
+    const name = usa ? `${usa}_${n.note_no}.xlsx` : `afleweringsnota_${n.note_no}.pdf`;
     const file = new File([blob], name, { type: blob.type });
     if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: `Delivery note ${n.note_no}` });
     else Boord.downloadBlob(blob, name);
@@ -264,7 +265,7 @@ function onDeliveryClick(ev) {
   else if ("scanseal" in t.dataset) (sealScanner ? stopSealScan() : startSealScan());
   else if ("savenote" in t.dataset) saveNote();
   else if ("pdf" in t.dataset) shareNote();
-  else if ("usa" in t.dataset) shareNote(true);
+  else if ("usa" in t.dataset) shareNote(t.dataset.usa);
   else if ("removenote" in t.dataset) removeNote();
 }
 
