@@ -86,6 +86,8 @@ def test_options_come_from_settings_which_need_the_pin(client, admin_client):
     assert r.json()["name"] == "Dapper"
     admin_client.put("/api/settings/transporters/1", json={"name": "Self", "active": False})
     assert admin_client.put("/api/settings/deliverynote", json={"cooled_to": 5}).json()["cooled_to"] == 5
+    admin_client.put("/api/settings/deliverynote", json={"cooled_to": 5, "target_receiver": " Seasons Farm Fresh "})
+    assert client.get("/api/deliverynote/options").json()["target_receiver"] == "Seasons Farm Fresh"
     assert admin_client.put("/api/settings/deliverynote", json={"cooled_to": 99}).status_code == 422
     o = client.get("/api/deliverynote/options").json()
     assert ([t["name"] for t in o["transporters"]], len(o["receivers"]), o["cooled_to"]) == (["Go Fresh"], 3, 5)
@@ -117,3 +119,69 @@ def test_last_number_follows_notes_and_settings_can_change_it(client, admin_clie
     assert admin_client.put("/api/settings/deliverynote", json={"cooled_to": 8, "last_no": 0}).status_code == 422
     admin_client.put("/api/settings/deliverynote", json={"cooled_to": 8, "last_no": None})
     assert last() == 1341  # cleared: the highest note ever used
+
+
+def test_usa_papers_list_every_pallet_line(client, pallets):
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+    sync(client, note(pallets=("p1", "p2")))
+    r = client.get("/api/deliverynote/n1/usa.xlsx")
+    assert r.status_code == 200 and 'usa_1335.xlsx' in r.headers["content-disposition"]
+    wb = load_workbook(BytesIO(r.content))
+    assert wb.sheetnames == ["Phyto", "Consignment", "Inspection Sheet"]
+    rows = [row for row in wb["Phyto"].iter_rows(values_only=True) if row[0] in (1, 2)]
+    assert [(row[1], row[2], row[8]) for row in rows] == [("060099005963004759", "D2087", "001"), ("B2", "D2087", "002")]
+    assert client.get("/api/deliverynote/nope/usa.xlsx").status_code == 404
+
+
+def test_usa_forms_are_drawn_from_the_note(client, pallets):
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+    sync(client, note(pallets=("p1", "p2")))
+    r = client.get("/api/deliverynote/n1/usa_forms.xlsx")
+    assert r.status_code == 200 and 'usa_forms_1335.xlsx' in r.headers["content-disposition"]
+    wb = load_workbook(BytesIO(r.content))
+    assert wb.sheetnames == ["Phyto", "Consignment", "Inspection Sheet"]
+    p, c, ins = wb["Phyto"], wb["Consignment"], wb["Inspection Sheet"]
+    assert (p["D5"].value, p["B19"].value, p["J20"].value, p["F16"].value, p["B21"].value) == (
+        "LW 1335", "060099005963004759", "002", 120, None)
+    assert (c["J4"].value, c["C14"].value, c["E4"].value, c["K15"].value) == ("LW 1335", "B2", "Boeretrust", 120)
+    assert (ins["A11"].value, ins["D11"].value) == ("B2", "USA")
+
+
+def test_usa_forms_keep_phyto_on_one_page_and_print_the_target_receiver():
+    import json as _json
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    import export_forms
+    from models import DeliveryNote
+    line = {"cartons": 192, "packaging_name": "Rhino 4.5 kg XL", "carton_kg": 4.5}
+    n = DeliveryNote(uuid="x", note_no=7, created_at=datetime.now(), loaded_on="2026-10-26", receiver="AgriLink",
+                     pallets=_json.dumps([{"pallet_ref": str(k), "barcode": "", "date_code": "", "lines": [line]} for k in range(27)]))
+    wb = load_workbook(BytesIO(export_forms.forms(n, "Seasons Farm Fresh\nToronto")))
+    p = wb["Phyto"]
+    assert wb.sheetnames == ["Phyto", "Consignment", "Inspection Sheet"]
+    assert (p["A45"].value, p.page_setup.fitToHeight) == (27, 1)
+    c = wb["Consignment"]
+    assert (c["J8"].value, c["A8"].value, c["C10"].value) == ("Seasons Farm Fresh\nToronto", "PUC code", "4050373828202")
+
+
+def test_eu_papers_have_no_phyto_and_their_own_target_receiver(client, admin_client, pallets):
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+    sync(client, note(pallets=("p1", "p2")))
+    admin_client.put("/api/settings/deliverynote", json={"cooled_to": 8, "target_receiver": "Seasons",
+                                                         "eu_target_receiver": "Rotterdam Fresh"})
+    wb = load_workbook(BytesIO(client.get("/api/deliverynote/n1/eu_forms.xlsx").content))
+    assert wb.sheetnames == ["Consignment", "Inspection Sheet"]
+    c, ins = wb["Consignment"], wb["Inspection Sheet"]
+    assert (c["J7"].value, c["J8"].value, ins["D10"].value) == ("EU", "Rotterdam Fresh", "EU")
+    simple = load_workbook(BytesIO(client.get("/api/deliverynote/n1/eu.xlsx").content))
+    assert simple.sheetnames == ["Consignment", "Inspection Sheet"]
+    assert load_workbook(BytesIO(client.get("/api/deliverynote/n1/usa_forms.xlsx").content))["Consignment"]["J8"].value == "Seasons"
+    assert client.get("/api/deliverynote/n1/uk_forms.xlsx").status_code == 404

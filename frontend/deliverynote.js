@@ -149,6 +149,7 @@ function noteForm() {
       <div id="noteMsg" class="text-sm text-red-600 empty:hidden">${d.note && d.note.error ? `Not saved: ${esc(d.note.error)}.` : ""}</div>
       <button type="button" data-savenote class="w-full boord-btn-primary rounded-xl py-4 text-lg font-bold">Save delivery note</button>
       ${d.note ? `<button type="button" data-pdf class="w-full border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-share-from-square"></i> Print or share</button>
+                  ${exportButtons(d.note)}
                   <button type="button" data-removenote class="w-full border border-red-300 text-red-700 rounded-xl py-3 font-semibold">Delete delivery note</button>` : ""}
     </div>`;
 }
@@ -226,22 +227,35 @@ async function removeNote() {
   renderDeliveryNote();
 }
 
+// A note with export pallets has their market's papers (USA: phyto,
+// consignment and PPECB sheet; EU: the same but no phyto), drawn as the
+// farm's forms or as plain tables. The market is read off the pallets'
+// market names (USA Sea Freight, EU Air Freight).
+const EXPORT_MARKETS = [["usa", "USA", /\busa\b/i], ["eu", "EU", /\beu\b/i]];
+
+function exportButtons(note) {
+  const markets = (note.pallets || []).map((p) => p.market_name || "");
+  return EXPORT_MARKETS.filter(([, , re]) => markets.some((m) => re.test(m))).map(([key, label]) =>
+    `<div class="grid grid-cols-2 gap-2"><button type="button" data-export="${key}_forms" class="border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-file-excel"></i> ${label} forms</button><button type="button" data-export="${key}" class="border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-table"></i> ${label} simple</button></div>`).join("");
+}
+
 // The server makes the PDF, so the note must have reached it: a copy still
 // in the outbox would print as it was before.
-async function shareNote() {
+async function shareNote(papers) {
   const n = Store.notes().find((x) => x.uuid === dn.draft.uuid);
   const msg = $("noteMsg");
   if (!n || n.synced === 0) { msg.textContent = "Still sending this note - try again when the pill says synced."; Store.syncNow(); return; }
   msg.textContent = "";
   try {
-    const blob = await Boord.api(`/api/deliverynote/${encodeURIComponent(n.uuid)}/pdf`);
-    const name = `afleweringsnota_${n.note_no}.pdf`;
-    const file = new File([blob], name, { type: "application/pdf" });
+    // papers: an export market's papers as Excel ("usa_forms", "eu"), else the note's PDF.
+    const blob = await Boord.api(`/api/deliverynote/${encodeURIComponent(n.uuid)}/${papers ? papers + ".xlsx" : "pdf"}`);
+    const name = papers ? `${papers}_${n.note_no}.xlsx` : `afleweringsnota_${n.note_no}.pdf`;
+    const file = new File([blob], name, { type: blob.type });
     if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: `Delivery note ${n.note_no}` });
     else Boord.downloadBlob(blob, name);
   } catch (e) {
     if (e.name === "AbortError") return; // closed the share sheet
-    msg.textContent = Boord.errorDetail(e, "No connection to the server - the PDF needs it.");
+    msg.textContent = Boord.errorDetail(e, "No connection to the server - printing needs it.");
   }
 }
 
@@ -262,6 +276,7 @@ function onDeliveryClick(ev) {
   else if ("scanseal" in t.dataset) (sealScanner ? stopSealScan() : startSealScan());
   else if ("savenote" in t.dataset) saveNote();
   else if ("pdf" in t.dataset) shareNote();
+  else if (t.dataset.export) shareNote(t.dataset.export);
   else if ("removenote" in t.dataset) removeNote();
 }
 
@@ -323,6 +338,8 @@ async function loadDeliverySettings() {
     $("receiverSettings").innerHTML = dnSettingsCard("receivers", receivers);
     $("dnCooledTo").value = opts.cooled_to;
     $("dnLastNo").value = opts.last_no || "";
+    $("dnTargetReceiver").value = opts.target_receiver || "";
+    $("dnEuTargetReceiver").value = opts.eu_target_receiver || "";
   } catch (e) {
     if (e.status === 401) { unlocked = false; show(); }
     else $("transporterSettings").innerHTML = $("receiverSettings").innerHTML = `<div class="text-sm text-slate-500">These can only be changed while the server can be reached.</div>`;
@@ -346,7 +363,9 @@ function saveDeliverySetting(ev) {
   if (ev.target.id === "dnSettingsForm") {
     const last = $("dnLastNo").value.trim();
     dnSettingsCall("/api/settings/deliverynote", { method: "PUT", body: { cooled_to: Number($("dnCooledTo").value),
-                                                                          last_no: last ? Number(last) : null } }, "Saved");
+                                                                          last_no: last ? Number(last) : null,
+                                                                          target_receiver: $("dnTargetReceiver").value,
+                                                                          eu_target_receiver: $("dnEuTargetReceiver").value } }, "Saved");
     return;
   }
   const form = ev.target.closest("[data-dn-form]");

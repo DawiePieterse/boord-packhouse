@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlmodel import Session, SQLModel, func, select
 
+import export_forms
 from db import get_packhouse_session
 from models import DeliveryNote, DeliveryNoteSettings, Pallet, Receiver, Transporter
 from routers.sulfur import _iso, _now, _utc_naive
@@ -169,6 +170,8 @@ def options(session: Session = Depends(get_packhouse_session)):
     settings = session.get(DeliveryNoteSettings, 1)
     return {"transporters": active(Transporter), "receivers": active(Receiver),
             "cooled_to": settings.cooled_to if settings else 8.0,
+            "target_receiver": settings.target_receiver if settings else "",
+            "eu_target_receiver": settings.eu_target_receiver if settings else "",
             "last_no": (settings.last_no if settings and settings.last_no
                         else session.exec(select(func.max(DeliveryNote.note_no))).one())}
 
@@ -373,3 +376,45 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     name = f"afleweringsnota_{n.note_no}.pdf"
     return Response(bytes(pdf.output()), media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+
+def _xlsx(content: bytes, name: str) -> Response:
+    return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+def _live(uuid: str, session: Session) -> DeliveryNote:
+    n = session.get(DeliveryNote, uuid)
+    if n is None or n.removed:
+        raise HTTPException(404, "No such delivery note")
+    return n
+
+
+# The export markets with papers (export_forms.py): its name on them, and the
+# Settings field holding its target receiver.
+MARKETS = {"usa": ("USA", "target_receiver"), "eu": ("EU", "eu_target_receiver")}
+
+
+def _export(market: str, session: Session):
+    if market not in MARKETS:
+        raise HTTPException(404, "No papers for that market")
+    name, field = MARKETS[market]
+    settings = session.get(DeliveryNoteSettings, 1)
+    return name, getattr(settings, field) if settings else ""
+
+
+@router.get("/{uuid}/{market}_forms.xlsx")
+def note_export_forms(uuid: str, market: str, session: Session = Depends(get_packhouse_session)):
+    """The note's pallets on the market's export papers, drawn as the farm's forms."""
+    n = _live(uuid, session)
+    name, target = _export(market, session)
+    return _xlsx(export_forms.forms(n, target, name), f"{market}_forms_{n.note_no}.xlsx")
+
+
+@router.get("/{uuid}/{market}.xlsx")
+def note_export(uuid: str, market: str, session: Session = Depends(get_packhouse_session)):
+    """The same papers as plain tables."""
+    n = _live(uuid, session)
+    name, target = _export(market, session)
+    return _xlsx(export_forms.simple(n, target, name), f"{market}_{n.note_no}.xlsx")
