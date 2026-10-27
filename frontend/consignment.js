@@ -237,7 +237,7 @@ function palletForm() {
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
       <div id="palletReader" class="hidden w-full rounded-lg overflow-hidden bg-black min-h-[200px]"></div>
       <div><span class="text-xs font-semibold text-slate-600">Barcode</span>
-        <div class="flex gap-2"><input data-field="barcode" value="${esc(d.barcode)}" inputmode="numeric" placeholder="Scan the pallet label (optional)" aria-label="Barcode" class="flex-1 min-w-0 ${field}">
+        <div class="flex gap-2"><input data-field="barcode" value="${esc(d.barcode)}" inputmode="numeric" placeholder="Scan the pallet label" aria-label="Barcode" class="flex-1 min-w-0 ${field}">
         <button type="button" data-scan title="Scan the pallet label" class="px-3 rounded-lg border border-slate-300"><i class="fa-solid fa-barcode text-xl"></i></button></div></div>
       <div class="flex gap-2">
         <label class="w-16 shrink-0"><span class="text-xs font-semibold text-slate-600">Pallet no</span>
@@ -330,6 +330,7 @@ async function savePallet() {
   if (!/^\d{3}$/.test(d.ref)) return fail("The pallet number is 3 digits, like 001.");
   if (!supplier) return fail("Pick the supplier.");
   if (!market) return fail("Pick the market.");
+  if (!barcode) return fail("Scan the pallet label first.");
   const twin = seasonPallets(d.pallet ? seasonOf(d.pallet.scanned_at) : seasonOf(nowIso())).find((p) => p.pallet_ref === d.ref && p.uuid !== d.uuid);
   if (twin) return fail(`Pallet ${d.ref} is already used this season.`);
   if (!lines.length) return fail("Pick a carton type and the number of cartons.");

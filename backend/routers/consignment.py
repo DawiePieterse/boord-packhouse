@@ -8,7 +8,8 @@ sent replaces the fields the phone owns. What the server owns, the pallet's
 year / number, is given once, the first time the pallet arrives.
 
 A stack only groups pallets: each pallet has its own supplier and market, and
-each of its lines (pack, cartons) its own block. A pallet's barcode is optional; when it has one, it is unique
+each of its lines (pack, cartons) its own block. A pallet's barcode is
+needed (an older pallet saved without one can still be removed) and unique
 among the pallets still on a consignment.
 """
 import json
@@ -77,6 +78,8 @@ def _pallet_problem(rec: PalletIn, session: Session) -> Optional[str]:
         return "unknown consignment"
     barcode = rec.barcode.strip()
     if not rec.removed:
+        if not barcode:
+            return "a pallet needs its scanned barcode"
         if not (len(rec.pallet_ref) == 3 and rec.pallet_ref.isascii() and rec.pallet_ref.isdigit()):
             return "the pallet number is 3 digits"
         # Unique across every stack in the season (the farm-local year the pallet
