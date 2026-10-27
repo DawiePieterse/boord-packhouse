@@ -88,6 +88,8 @@ def _note_problem(rec: NoteIn, session: Session) -> Optional[str]:
         p = session.get(Pallet, uuid)
         if p is None or p.removed:
             return "a pallet on it is not on the server (yet), or was deleted"
+    if len({export_forms.market_group(session.get(Pallet, u).market_name) for u in uuids}) > 1:
+        return "a note is all USA, all EU or all local pallets"
     # ponytail: scans every live note; a JSON column, fine for a farm's season of notes
     others = session.exec(select(DeliveryNote).where(DeliveryNote.uuid != rec.uuid, DeliveryNote.removed == False)).all()  # noqa: E712
     for other in others:
@@ -251,7 +253,7 @@ def _draw(n: DeliveryNote, pages: int):
         room = pdf.get_string_width(title) + 6
         text(11, title, "B", h=7, w=room)
         pdf.set_text_color(200, 0, 0)
-        text(14, str(n.note_no), "B", h=7, w=30)
+        text(14, export_forms.note_label(n), "B", h=7, w=30)
         text(14, f"page {pdf.page_no()} of {pages}", "B", h=7, w=w - room - 30, align="R")
         pdf.set_text_color(0, 0, 0)
         pdf.ln()
@@ -368,12 +370,15 @@ def _draw(n: DeliveryNote, pages: int):
 
 @router.get("/{uuid}/pdf")
 def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
-    """The note as the paper Afleweringsnota, on A4, signature lines blank."""
+    """The note as the paper Afleweringsnota, on A4, signature lines blank.
+    Only a local note has one: an export note goes out on its market's papers."""
     n = session.get(DeliveryNote, uuid)
     if n is None or n.removed:
         raise HTTPException(404, "No such delivery note")
+    if export_forms.note_label(n).startswith("LW"):
+        raise HTTPException(409, "An export note goes out on its market's documents, not the delivery note")
     pdf = _draw(n, _draw(n, 1).page_no())
-    name = f"afleweringsnota_{n.note_no}.pdf"
+    name = f"afleweringsnota_{export_forms.note_label(n)}.pdf"
     return Response(bytes(pdf.output()), media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
@@ -409,12 +414,5 @@ def note_export_forms(uuid: str, market: str, session: Session = Depends(get_pac
     """The note's pallets on the market's export papers, drawn as the farm's forms."""
     n = _live(uuid, session)
     name, target = _export(market, session)
-    return _xlsx(export_forms.forms(n, target, name), f"{market}_forms_{n.note_no}.xlsx")
+    return _xlsx(export_forms.forms(n, target, name), f"{market}_forms_{export_forms.note_label(n)}.xlsx")
 
-
-@router.get("/{uuid}/{market}.xlsx")
-def note_export(uuid: str, market: str, session: Session = Depends(get_packhouse_session)):
-    """The same papers as plain tables."""
-    n = _live(uuid, session)
-    name, target = _export(market, session)
-    return _xlsx(export_forms.simple(n, target, name), f"{market}_{n.note_no}.xlsx")

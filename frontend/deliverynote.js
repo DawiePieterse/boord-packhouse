@@ -44,18 +44,19 @@ function renderDeliveryNote() {
   $("deliveryBody").innerHTML = dn.view === "note" ? noteForm() : notesView();
 }
 
+// The 30 newest notes under a heading per market group (USA, EU, Local),
+// newest first within each, each with its market.
 function notesView() {
-  const rows = Store.notes().slice(0, 30).map((n) => `
-    <button type="button" data-note="${esc(n.uuid)}" class="w-full text-left border-t py-2 active:bg-slate-50">
-      <div class="flex justify-between gap-3 items-baseline">
-        <div class="font-bold text-lg">Note ${esc(n.note_no)}</div>
-        <div class="text-sm shrink-0">${esc(dnDay(n.loaded_on))}</div>
-      </div>
-      <div class="text-sm truncate">${esc(n.receiver.split("\n")[0])}${n.transporter ? ` · ${esc(n.transporter)}` : ""}</div>
-      <div class="text-sm">${noteTotals(n.pallets)}</div>
-      <div class="text-xs text-slate-500 truncate">Pallets ${n.pallets.map((p) => esc(p.pallet_ref)).join(", ")}</div>
-      ${n.error ? `<div class="text-sm text-red-600 mt-1">Not saved: ${esc(n.error)}. Tap to fix it.</div>` : ""}
-    </button>`).join("");
+  const recent = Store.notes().slice(0, 30);
+  const rows = MARKET_GROUPS.map(([key, title]) => {
+    const group = recent.filter((n) => noteGroup(n) === key);
+    if (!group.length) return "";
+    return `
+    <div class="border-t-2 border-slate-300 pt-3 pb-1 flex justify-between items-baseline">
+      <div class="text-lg font-bold">${title}</div>
+      <div class="text-sm text-slate-500">${group.length} note${group.length === 1 ? "" : "s"}</div>
+    </div>` + group.map(noteRow).join("");
+  }).join("");
   return `
     <div class="bg-white rounded-2xl shadow p-4">
       <button type="button" data-addnote class="w-full boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-file-lines"></i> New delivery note</button>
@@ -67,6 +68,21 @@ function notesView() {
       </div>
       ${rows || `<div class="text-center text-slate-400 text-sm py-6 border-t">No delivery notes yet</div>`}
     </div>`;
+}
+
+function noteRow(n) {
+  return `
+    <button type="button" data-note="${esc(n.uuid)}" class="w-full text-left border-t py-2 active:bg-slate-50">
+      <div class="flex justify-between gap-3 items-baseline">
+        <div class="font-bold text-lg">Note ${esc(noteLabel(n))}</div>
+        <div class="text-sm shrink-0">${esc(dnDay(n.loaded_on))}</div>
+      </div>
+      <div class="text-sm font-semibold text-blue-800">${esc(noteMarkets(n))}</div>
+      <div class="text-sm truncate">${esc(n.receiver.split("\n")[0])}${n.transporter ? ` · ${esc(n.transporter)}` : ""}</div>
+      <div class="text-sm">${noteTotals(n.pallets)}</div>
+      <div class="text-xs text-slate-500 truncate">Pallets ${n.pallets.map((p) => esc(p.pallet_ref)).join(", ")}</div>
+      ${n.error ? `<div class="text-sm text-red-600 mt-1">Not saved: ${esc(n.error)}. Tap to fix it.</div>` : ""}
+    </button>`;
 }
 
 function openNote(note) {
@@ -106,22 +122,37 @@ function noteForm() {
     + rows.map((r) => `<option value="${esc(r.id)}"${r.id === picked ? " selected" : ""}>${esc(text(r))}</option>`).join("") + `</select>`;
   const choices = palletChoices(d);
   const picked = choices.filter((p) => d.picked.includes(p.uuid));
-  const pallets = choices.map((p) => {
-    const on = d.picked.includes(p.uuid);
+  // The pallets in their market groups; once one is ticked the other groups
+  // can't be (a delivery is all USA, all EU or all local).
+  const locked = picked.length ? marketGroup(picked[0].market_name) : null;
+  const pallets = MARKET_GROUPS.map(([key, title]) => {
+    const group = choices.filter((p) => marketGroup(p.market_name) === key);
+    if (!group.length) return "";
+    const off = locked && locked !== key;
     return `
-    <button type="button" data-pick="${esc(p.uuid)}" class="w-full text-left flex gap-3 border-t py-2 ${on ? "bg-blue-50" : "active:bg-slate-50"}">
+    <div class="border-t-2 border-slate-300 pt-3 pb-1 flex justify-between items-baseline ${off ? "opacity-40" : ""}">
+      <div class="text-lg font-bold">${title}</div>
+      <div class="text-sm text-slate-500">${off ? `Not with ${groupTitle(locked)} pallets` : `${group.length} pallet${group.length === 1 ? "" : "s"}`}</div>
+    </div>` + group.map((p) => {
+      const on = d.picked.includes(p.uuid);
+      return `
+    <button type="button" data-pick="${esc(p.uuid)}" ${off ? "disabled" : ""} class="w-full text-left flex gap-3 border-t py-2 ${on ? "bg-blue-50" : off ? "opacity-40" : "active:bg-slate-50"}">
       <i class="fa-${on ? "solid fa-square-check text-blue-700" : "regular fa-square text-slate-400"} text-2xl pt-1"></i>
       <div class="flex-1 min-w-0">${palletSummary(p)}</div>
     </button>`;
+    }).join("");
   }).join("");
   return `
     <div class="flex items-center gap-3">
       <button type="button" data-back class="px-3 py-2 rounded-lg border border-slate-300 bg-white"><i class="fa-solid fa-arrow-left"></i></button>
-      <div class="flex-1 font-semibold">${d.note ? `Delivery note ${esc(d.note.note_no)}` : "New delivery note"}</div>
+      <div class="flex-1 min-w-0">
+        <div class="font-semibold">${d.note ? `Delivery note ${esc(noteLabel(d.note))}` : "New delivery note"}</div>
+        ${picked.length ? `<div class="text-sm font-semibold text-blue-800">${esc(noteMarkets({ pallets: picked }))}</div>` : ""}
+      </div>
     </div>
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
       <div class="flex gap-2">
-        ${label("Note no", input("no", `inputmode="numeric" maxlength="6" placeholder="1335"`), "w-24 shrink-0")}
+        ${label(`Note no (${notePrefix(picked)}-)`, input("no", `inputmode="numeric" maxlength="6" placeholder="1335"`), "w-28 shrink-0")}
         ${label("Transporter", select("transporter", transporterChoices(d), d.transporter_id, "Transporter...", (r) => r.name), "flex-1 min-w-0")}
       </div>
       ${label("Receiver", select("receiver", receiverChoices(d), d.receiver_id, "Receiver...", (r) => (r.text || receiverText(r)).split("\n").join(" · ")))}
@@ -141,15 +172,16 @@ function noteForm() {
       <div class="${LIST_HEAD}">
         <div class="text-lg font-bold">Pallets in this delivery</div>
         <div id="noteTotals" class="text-base">${noteTotals(picked)}</div>
-        <div class="text-xs text-white/80">Tick the pallets from Pallet Stack that go in this delivery.</div>
+        <div class="text-xs text-white/80">Tick the pallets from Pallet Stack that go in this delivery: all USA, all EU or all local.</div>
       </div>
       ${pallets || `<div class="text-center text-slate-400 text-sm py-6 border-t">No pallets left to send</div>`}
     </div>
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
       <div id="noteMsg" class="text-sm text-red-600 empty:hidden">${d.note && d.note.error ? `Not saved: ${esc(d.note.error)}.` : ""}</div>
       <button type="button" data-savenote class="w-full boord-btn-primary rounded-xl py-4 text-lg font-bold">Save delivery note</button>
-      ${d.note ? `<button type="button" data-pdf class="w-full border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-share-from-square"></i> Print or share</button>
-                  ${exportButtons(d.note)}
+      ${d.note ? `${noteGroup(d.note) === "local" /* local: the Bekfontein delivery note; export: the market's spreadsheet instead */
+                    ? `<button type="button" data-pdf class="w-full border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-share-from-square"></i> Print or share</button>`
+                    : exportButtons(d.note)}
                   <button type="button" data-removenote class="w-full border border-red-300 text-red-700 rounded-xl py-3 font-semibold">Delete delivery note</button>` : ""}
     </div>`;
 }
@@ -205,6 +237,7 @@ async function saveNote() {
   if (!transporter) return fail("Pick the transporter.");
   if (!d.loaded_on) return fail("Pick the loading date.");
   if (!pallets.length) return fail("Tick the pallets in this delivery.");
+  if (new Set(pallets.map((p) => marketGroup(p.market_name))).size > 1) return fail("Untick the pallets of the other market: a delivery is all USA, all EU or all local.");
   const op = Operator.current() || {};
   const base = d.note || { kind: "delivery_note", created_at: new Date(Store.now()).toISOString(),
                            made_by: op.id || "", made_by_name: op.name || "" };
@@ -219,7 +252,7 @@ async function saveNote() {
 }
 
 async function removeNote() {
-  if (!confirm(`Delete delivery note ${dn.draft.note.note_no}?`)) return;
+  if (!confirm(`Delete delivery note ${noteLabel(dn.draft.note)}?`)) return;
   const op = Operator.current() || {};
   await Store.saveRun({ ...dn.draft.note, kind: "delivery_note", removed: true, changed_by: op.id || "",
                         changed_by_name: op.name || "", rev: Date.now() });
@@ -227,16 +260,37 @@ async function removeNote() {
   renderDeliveryNote();
 }
 
-// A note with export pallets has their market's papers (USA: phyto,
+// A note of export pallets has their market's papers (USA: phyto,
 // consignment and PPECB sheet; EU: the same but no phyto), drawn as the
-// farm's forms or as plain tables. The market is read off the pallets'
-// market names (USA Sea Freight, EU Air Freight).
+// farm's forms, in place of the Bekfontein delivery note a local note prints. The market is read off the pallets' market names (USA Sea
+// Freight, EU Air Freight).
 const EXPORT_MARKETS = [["usa", "USA", /\busa\b/i], ["eu", "EU", /\beu\b/i]];
+
+// A pallet's market group: usa or eu by its market name, else local. A note
+// holds one group (export_forms.market_group checks it on the server).
+const MARKET_GROUPS = [["usa", "USA"], ["eu", "EU"], ["local", "Local"]];
+function marketGroup(name) {
+  const hit = EXPORT_MARKETS.find(([, , re]) => re.test(name || ""));
+  return hit ? hit[0] : "local";
+}
+const groupTitle = (key) => MARKET_GROUPS.find(([k]) => k === key)[1];
+// A note's group is its pallets' (one group to a note; an older mixed note
+// goes by its first pallet), and its market the pallets' market names.
+const noteGroup = (n) => (n.pallets.length ? marketGroup(n.pallets[0].market_name) : "local");
+const noteMarkets = (n) => [...new Set(n.pallets.map((p) => p.market_name).filter(Boolean))].join(", ") || groupTitle(noteGroup(n));
+
+// The note number's prefix: LW for a delivery of export (USA or EU)
+// pallets, B for local. One series of numbers, as export_forms.note_label.
+function notePrefix(pallets) {
+  return (pallets || []).some((p) => marketGroup(p.market_name) !== "local") ? "LW" : "B";
+}
+
+function noteLabel(n) { return `${notePrefix(n.pallets)}-${n.note_no}`; }
 
 function exportButtons(note) {
   const markets = (note.pallets || []).map((p) => p.market_name || "");
   return EXPORT_MARKETS.filter(([, , re]) => markets.some((m) => re.test(m))).map(([key, label]) =>
-    `<div class="grid grid-cols-2 gap-2"><button type="button" data-export="${key}_forms" class="border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-file-excel"></i> ${label} forms</button><button type="button" data-export="${key}" class="border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-table"></i> ${label} simple</button></div>`).join("");
+    `<button type="button" data-export="${key}_forms" class="w-full border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-file-excel"></i> Print or share ${label} documents</button>`).join("");
 }
 
 // The server makes the PDF, so the note must have reached it: a copy still
@@ -247,11 +301,11 @@ async function shareNote(papers) {
   if (!n || n.synced === 0) { msg.textContent = "Still sending this note - try again when the pill says synced."; Store.syncNow(); return; }
   msg.textContent = "";
   try {
-    // papers: an export market's papers as Excel ("usa_forms", "eu"), else the note's PDF.
+    // papers: an export market's papers as Excel ("usa_forms", "eu_forms"), else the note's PDF.
     const blob = await Boord.api(`/api/deliverynote/${encodeURIComponent(n.uuid)}/${papers ? papers + ".xlsx" : "pdf"}`);
-    const name = papers ? `${papers}_${n.note_no}.xlsx` : `afleweringsnota_${n.note_no}.pdf`;
+    const name = papers ? `${papers}_${noteLabel(n)}.xlsx` : `afleweringsnota_${noteLabel(n)}.pdf`;
     const file = new File([blob], name, { type: blob.type });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: `Delivery note ${n.note_no}` });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: `Delivery note ${noteLabel(n)}` });
     else Boord.downloadBlob(blob, name);
   } catch (e) {
     if (e.name === "AbortError") return; // closed the share sheet
@@ -268,6 +322,7 @@ function onDeliveryClick(ev) {
   else if ("back" in t.dataset) { dn.view = "list"; renderDeliveryNote(); }
   else if (t.dataset.pick) {
     const u = t.dataset.pick;
+    if (t.disabled) return; // another market's pallet
     d.picked = d.picked.includes(u) ? d.picked.filter((x) => x !== u) : [...d.picked, u];
     const y = window.scrollY;
     renderDeliveryNote();
