@@ -142,7 +142,7 @@ def test_usa_forms_are_drawn_from_the_note(client, pallets):
     p, c, ins = wb["Phyto"], wb["Consignment"], wb["Inspection Sheet"]
     assert (p["D5"].value, p["B19"].value, p["J20"].value, p["F16"].value, p["B21"].value) == (
         "LW-1335", "060099005963004759", "002", 120, None)
-    assert (c["J4"].value, c["C14"].value, c["E4"].value, c["K15"].value) == ("LW-1335", "B2", "Boeretrust", 120)
+    assert (c["J4"].value, c["C15"].value, c["E4"].value, c["K16"].value) == ("LW-1335", "B2", "Boeretrust", 120)
     assert client.get("/api/deliverynote/nope/usa_forms.xlsx").status_code == 404
     assert client.get("/api/deliverynote/n1/usa.xlsx").status_code == 404  # no simple sheets
     assert (ins["A11"].value, ins["D11"].value) == ("B2", "USA")
@@ -164,7 +164,8 @@ def test_usa_forms_keep_phyto_on_one_page_and_print_the_target_receiver():
     assert wb.sheetnames == ["Phyto", "Consignment", "Inspection Sheet"]
     assert (p["A45"].value, p.page_setup.fitToHeight) == (27, 1)
     c = wb["Consignment"]
-    assert (c["J8"].value, c["A8"].value, c["C10"].value) == ("Seasons Farm Fresh\nToronto", "PUC code", "4050373828202")
+    assert (c["J8"].value, c["A8"].value, c["C10"].value, c["A11"].value) == (
+        "Seasons Farm Fresh\nToronto", "PUC code", "4050373828202", "GlobalG.A.P. Certified")
 
 
 def test_export_papers_print_the_notes_own_target_receiver(client, admin_client, pallets):
