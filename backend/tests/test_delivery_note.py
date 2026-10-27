@@ -167,7 +167,7 @@ def test_usa_forms_keep_phyto_on_one_page_and_print_the_target_receiver():
     assert wb.sheetnames == ["Phyto", "Consignment", "Inspection Sheet"]
     assert (p["A45"].value, p.page_setup.fitToHeight) == (27, 1)
     c = wb["Consignment"]
-    assert (c["J8"].value, c["A8"].value, c["C10"].value) == ("Seasons Farm Fresh\nToronto", "PUC code", "4050373828202 (GlobalG.A.P.)")
+    assert (c["J8"].value, c["A8"].value, c["C10"].value) == ("Seasons Farm Fresh\nToronto", "PUC code", "4050373828202")
 
 
 def test_eu_papers_have_no_phyto_and_their_own_target_receiver(client, admin_client, pallets):

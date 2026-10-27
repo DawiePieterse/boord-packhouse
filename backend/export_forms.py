@@ -232,7 +232,7 @@ def _consignment(wb, f):
     _put(ws, "A3:D3", "Sender", "head")
     _put(ws, "E3:H3", "Receiver", "head")
     _put(ws, "I3:K3", "Consignment", "head")
-    sender = [(line, None) for line in SENDER] + [("PUC code", PUC), ("PHC code", PHC), ("GGN", f"{GGN} (GlobalG.A.P.)")]
+    sender = [(line, None) for line in SENDER] + [("PUC code", PUC), ("PHC code", PHC), ("GGN", GGN)]
     codes = [("Consignment nr", f["doc_no"]), ("Date", f["day"]), ("Inspection point", INSPECTION_POINT),
              ("Target market", f["market"])]
     for i, (a, b) in enumerate(sender):
@@ -407,7 +407,6 @@ def simple(n, target: str = "", market: str = "USA") -> bytes:
         ["Sender:", SENDER[0], "", "Receiver:", ", ".join(f["receiver"]), "PUC Code:", PUC],
         ["", ", ".join(SENDER[1:]), "", "", "", "PHC Code:", PHC],
         ["Date:", day, "", "", "", "GGN Nr:", GGN],
-        ["", "", "", "", "", "GlobalG.A.P. Certified"],
         ["", "", "", "", "", "Inspection point nr:", INSPECTION_POINT],
         ["", "", "", "", "", "Target market:", f["market"]],
         ["", "", "", "", "", "Target receiver:", ", ".join(f["target"].split("\n"))],
