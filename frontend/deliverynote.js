@@ -48,14 +48,10 @@ function renderDeliveryNote() {
 // newest first within each, each with its market.
 function notesView() {
   const recent = Store.notes().slice(0, 30);
-  const rows = MARKET_GROUPS.map(([key, title]) => {
+  const rows = MARKET_GROUPS.map(([key]) => {
     const group = recent.filter((n) => noteGroup(n) === key);
     if (!group.length) return "";
-    return `
-    <div class="border-t-2 border-slate-300 pt-3 pb-1 flex justify-between items-baseline">
-      <div class="text-lg font-bold">${title}</div>
-      <div class="text-sm text-slate-500">${group.length} note${group.length === 1 ? "" : "s"}</div>
-    </div>` + group.map(noteRow).join("");
+    return groupHead(key, `${group.length} note${group.length === 1 ? "" : "s"}`) + group.map(noteRow).join("");
   }).join("");
   return `
     <div class="bg-white rounded-2xl shadow p-4">
@@ -125,15 +121,12 @@ function noteForm() {
   // The pallets in their market groups; once one is ticked the other groups
   // can't be (a delivery is all USA, all EU or all local).
   const locked = picked.length ? marketGroup(picked[0].market_name) : null;
-  const pallets = MARKET_GROUPS.map(([key, title]) => {
+  const pallets = MARKET_GROUPS.map(([key]) => {
     const group = choices.filter((p) => marketGroup(p.market_name) === key);
     if (!group.length) return "";
     const off = locked && locked !== key;
-    return `
-    <div class="border-t-2 border-slate-300 pt-3 pb-1 flex justify-between items-baseline ${off ? "opacity-40" : ""}">
-      <div class="text-lg font-bold">${title}</div>
-      <div class="text-sm text-slate-500">${off ? `Not with ${groupTitle(locked)} pallets` : `${group.length} pallet${group.length === 1 ? "" : "s"}`}</div>
-    </div>` + group.map((p) => {
+    return groupHead(key, off ? `Not with ${groupTitle(locked)} pallets` : `${group.length} pallet${group.length === 1 ? "" : "s"}`, off)
+      + group.map((p) => {
       const on = d.picked.includes(p.uuid);
       return `
     <button type="button" data-pick="${esc(p.uuid)}" ${off ? "disabled" : ""} class="w-full text-left flex gap-3 border-t py-2 ${on ? "bg-blue-50" : off ? "opacity-40" : "active:bg-slate-50"}">
@@ -247,8 +240,10 @@ async function saveNote() {
                         seal_no: d.seal_no.trim(), cooled_to: d.cooled_to.trim(),
                         loaded_on: d.loaded_on, offloaded_on: d.offloaded_on, pallets,
                         changed_by: op.id || "", changed_by_name: op.name || "", removed: false, rev: Date.now() });
-  // Stay on the note, now saved, so it can be printed or shared at once.
-  openNote(Store.notes().find((n) => n.uuid === d.uuid));
+  // A new note goes back to the overview, where it now shows; an edited one
+  // stays open, so it can be printed or shared at once.
+  if (!d.note) { dn.view = "list"; renderDeliveryNote(); window.scrollTo(0, 0); }
+  else openNote(Store.notes().find((n) => n.uuid === d.uuid));
 }
 
 async function removeNote() {
@@ -260,20 +255,6 @@ async function removeNote() {
   renderDeliveryNote();
 }
 
-// A note of export pallets has their market's papers (USA: phyto,
-// consignment and PPECB sheet; EU: the same but no phyto), drawn as the
-// farm's forms, in place of the Bekfontein delivery note a local note prints. The market is read off the pallets' market names (USA Sea
-// Freight, EU Air Freight).
-const EXPORT_MARKETS = [["usa", "USA", /\busa\b/i], ["eu", "EU", /\beu\b/i]];
-
-// A pallet's market group: usa or eu by its market name, else local. A note
-// holds one group (export_forms.market_group checks it on the server).
-const MARKET_GROUPS = [["usa", "USA"], ["eu", "EU"], ["local", "Local"]];
-function marketGroup(name) {
-  const hit = EXPORT_MARKETS.find(([, , re]) => re.test(name || ""));
-  return hit ? hit[0] : "local";
-}
-const groupTitle = (key) => MARKET_GROUPS.find(([k]) => k === key)[1];
 // A note's group is its pallets' (one group to a note; an older mixed note
 // goes by its first pallet), and its market the pallets' market names.
 const noteGroup = (n) => (n.pallets.length ? marketGroup(n.pallets[0].market_name) : "local");
@@ -287,6 +268,11 @@ function notePrefix(pallets) {
 
 function noteLabel(n) { return `${notePrefix(n.pallets)}-${n.note_no}`; }
 
+// A note of export pallets has their market's papers (USA: phyto,
+// consignment and PPECB sheet; EU: the same but no phyto), drawn as the
+// farm's forms, in place of the Bekfontein delivery note a local note
+// prints. The market is read off the pallets' market names (USA Sea
+// Freight, EU Air Freight).
 function exportButtons(note) {
   const markets = (note.pallets || []).map((p) => p.market_name || "");
   return EXPORT_MARKETS.filter(([, , re]) => markets.some((m) => re.test(m))).map(([key, label]) =>
