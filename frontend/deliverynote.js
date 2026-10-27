@@ -48,10 +48,10 @@ function renderDeliveryNote() {
 // newest first within each, each with its market.
 function notesView() {
   const recent = Store.notes().slice(0, 30);
-  const rows = MARKET_GROUPS.map(([key, title]) => {
+  const rows = MARKET_GROUPS.map(([key]) => {
     const group = recent.filter((n) => noteGroup(n) === key);
     if (!group.length) return "";
-    return groupHead(title, `${group.length} note${group.length === 1 ? "" : "s"}`) + group.map(noteRow).join("");
+    return groupHead(key, `${group.length} note${group.length === 1 ? "" : "s"}`) + group.map(noteRow).join("");
   }).join("");
   return `
     <div class="bg-white rounded-2xl shadow p-4">
@@ -121,11 +121,11 @@ function noteForm() {
   // The pallets in their market groups; once one is ticked the other groups
   // can't be (a delivery is all USA, all EU or all local).
   const locked = picked.length ? marketGroup(picked[0].market_name) : null;
-  const pallets = MARKET_GROUPS.map(([key, title]) => {
+  const pallets = MARKET_GROUPS.map(([key]) => {
     const group = choices.filter((p) => marketGroup(p.market_name) === key);
     if (!group.length) return "";
     const off = locked && locked !== key;
-    return groupHead(title, off ? `Not with ${groupTitle(locked)} pallets` : `${group.length} pallet${group.length === 1 ? "" : "s"}`, off)
+    return groupHead(key, off ? `Not with ${groupTitle(locked)} pallets` : `${group.length} pallet${group.length === 1 ? "" : "s"}`, off)
       + group.map((p) => {
       const on = d.picked.includes(p.uuid);
       return `
@@ -240,8 +240,10 @@ async function saveNote() {
                         seal_no: d.seal_no.trim(), cooled_to: d.cooled_to.trim(),
                         loaded_on: d.loaded_on, offloaded_on: d.offloaded_on, pallets,
                         changed_by: op.id || "", changed_by_name: op.name || "", removed: false, rev: Date.now() });
-  // Stay on the note, now saved, so it can be printed or shared at once.
-  openNote(Store.notes().find((n) => n.uuid === d.uuid));
+  // A new note goes back to the overview, where it now shows; an edited one
+  // stays open, so it can be printed or shared at once.
+  if (!d.note) { dn.view = "list"; renderDeliveryNote(); window.scrollTo(0, 0); }
+  else openNote(Store.notes().find((n) => n.uuid === d.uuid));
 }
 
 async function removeNote() {

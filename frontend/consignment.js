@@ -44,10 +44,10 @@ const sameDay = (iso) => new Date(iso).toDateString() === new Date(Store.now()).
 // Under a heading per market group (USA, EU, Local), newest first within each.
 function palletsView() {
   const pallets = newestFirst().filter((p) => sameDay(p.scanned_at) || p.error);
-  const rows = MARKET_GROUPS.map(([key, title]) => {
+  const rows = MARKET_GROUPS.map(([key]) => {
     const group = pallets.filter((p) => marketGroup(p.market_name) === key);
     if (!group.length) return "";
-    return groupHead(title, `${group.length} pallet${group.length === 1 ? "" : "s"} · ${sum(group, palletCartons)} cartons · ${kgText(sum(group, palletKg))}`)
+    return groupHead(key, `${group.length} pallet${group.length === 1 ? "" : "s"} · ${sum(group, palletCartons)} cartons · ${kgText(sum(group, palletKg))}`)
       + group.map((p) => `
     <button type="button" data-pallet="${esc(p.uuid)}" class="w-full text-left border-t py-2 active:bg-slate-50">
       ${palletSummary(p)}
@@ -79,12 +79,15 @@ function marketGroup(name) {
 }
 const groupTitle = (key) => MARKET_GROUPS.find(([k]) => k === key)[1];
 
-// The heading between market groups in a list: the group's name, a note on
-// the right (its count; why it can't be picked), greyed when dim.
-const groupHead = (title, right, dim) => `
-    <div class="border-t-2 border-slate-300 pt-3 pb-1 flex justify-between items-baseline gap-3 ${dim ? "opacity-40" : ""}">
-      <div class="text-lg font-bold">${title}</div>
-      <div class="text-sm text-slate-500 text-right">${right}</div>
+// The heading between market groups in a list: a band across the card in
+// the group's colour, its name, a note on the right (its count; why it can't
+// be picked), greyed when dim.
+const GROUP_BAND = { usa: "bg-blue-100 border-blue-600 text-blue-900", eu: "bg-violet-100 border-violet-600 text-violet-900",
+                     local: "bg-emerald-100 border-emerald-600 text-emerald-900" };
+const groupHead = (key, right, dim) => `
+    <div class="-mx-4 px-4 py-2.5 mt-2 border-l-8 ${GROUP_BAND[key]} flex justify-between items-baseline gap-3 ${dim ? "opacity-40" : ""}">
+      <div class="text-xl font-bold">${groupTitle(key)}</div>
+      <div class="text-sm font-semibold text-right">${right}</div>
     </div>`;
 
 // The head of a list card (Pallets added today; a delivery note's pallets): a
