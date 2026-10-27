@@ -48,7 +48,7 @@ function notesView() {
   const rows = Store.notes().slice(0, 30).map((n) => `
     <button type="button" data-note="${esc(n.uuid)}" class="w-full text-left border-t py-2 active:bg-slate-50">
       <div class="flex justify-between gap-3 items-baseline">
-        <div class="font-bold text-lg">Note ${esc(n.note_no)}</div>
+        <div class="font-bold text-lg">Note ${esc(noteLabel(n))}</div>
         <div class="text-sm shrink-0">${esc(dnDay(n.loaded_on))}</div>
       </div>
       <div class="text-sm truncate">${esc(n.receiver.split("\n")[0])}${n.transporter ? ` · ${esc(n.transporter)}` : ""}</div>
@@ -117,11 +117,11 @@ function noteForm() {
   return `
     <div class="flex items-center gap-3">
       <button type="button" data-back class="px-3 py-2 rounded-lg border border-slate-300 bg-white"><i class="fa-solid fa-arrow-left"></i></button>
-      <div class="flex-1 font-semibold">${d.note ? `Delivery note ${esc(d.note.note_no)}` : "New delivery note"}</div>
+      <div class="flex-1 font-semibold">${d.note ? `Delivery note ${esc(noteLabel(d.note))}` : "New delivery note"}</div>
     </div>
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
       <div class="flex gap-2">
-        ${label("Note no", input("no", `inputmode="numeric" maxlength="6" placeholder="1335"`), "w-24 shrink-0")}
+        ${label(`Note no (${notePrefix(picked)}-)`, input("no", `inputmode="numeric" maxlength="6" placeholder="1335"`), "w-28 shrink-0")}
         ${label("Transporter", select("transporter", transporterChoices(d), d.transporter_id, "Transporter...", (r) => r.name), "flex-1 min-w-0")}
       </div>
       ${label("Receiver", select("receiver", receiverChoices(d), d.receiver_id, "Receiver...", (r) => (r.text || receiverText(r)).split("\n").join(" · ")))}
@@ -219,7 +219,7 @@ async function saveNote() {
 }
 
 async function removeNote() {
-  if (!confirm(`Delete delivery note ${dn.draft.note.note_no}?`)) return;
+  if (!confirm(`Delete delivery note ${noteLabel(dn.draft.note)}?`)) return;
   const op = Operator.current() || {};
   await Store.saveRun({ ...dn.draft.note, kind: "delivery_note", removed: true, changed_by: op.id || "",
                         changed_by_name: op.name || "", rev: Date.now() });
@@ -229,14 +229,22 @@ async function removeNote() {
 
 // A note with export pallets has their market's papers (USA: phyto,
 // consignment and PPECB sheet; EU: the same but no phyto), drawn as the
-// farm's forms or as plain tables. The market is read off the pallets'
-// market names (USA Sea Freight, EU Air Freight).
+// farm's forms. The market is read off the pallets' market names (USA Sea
+// Freight, EU Air Freight).
 const EXPORT_MARKETS = [["usa", "USA", /\busa\b/i], ["eu", "EU", /\beu\b/i]];
+
+// The note number's prefix: LW for a delivery with export (USA or EU)
+// pallets, B for local. One series of numbers, as export_forms.note_label.
+function notePrefix(pallets) {
+  return (pallets || []).some((p) => EXPORT_MARKETS.some(([, , re]) => re.test(p.market_name || ""))) ? "LW" : "B";
+}
+
+function noteLabel(n) { return `${notePrefix(n.pallets)}-${n.note_no}`; }
 
 function exportButtons(note) {
   const markets = (note.pallets || []).map((p) => p.market_name || "");
   return EXPORT_MARKETS.filter(([, , re]) => markets.some((m) => re.test(m))).map(([key, label]) =>
-    `<div class="grid grid-cols-2 gap-2"><button type="button" data-export="${key}_forms" class="border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-file-excel"></i> ${label} forms</button><button type="button" data-export="${key}" class="border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-table"></i> ${label} simple</button></div>`).join("");
+    `<button type="button" data-export="${key}_forms" class="w-full border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-file-excel"></i> ${label} forms</button>`).join("");
 }
 
 // The server makes the PDF, so the note must have reached it: a copy still
@@ -247,11 +255,11 @@ async function shareNote(papers) {
   if (!n || n.synced === 0) { msg.textContent = "Still sending this note - try again when the pill says synced."; Store.syncNow(); return; }
   msg.textContent = "";
   try {
-    // papers: an export market's papers as Excel ("usa_forms", "eu"), else the note's PDF.
+    // papers: an export market's papers as Excel ("usa_forms", "eu_forms"), else the note's PDF.
     const blob = await Boord.api(`/api/deliverynote/${encodeURIComponent(n.uuid)}/${papers ? papers + ".xlsx" : "pdf"}`);
-    const name = papers ? `${papers}_${n.note_no}.xlsx` : `afleweringsnota_${n.note_no}.pdf`;
+    const name = papers ? `${papers}_${noteLabel(n)}.xlsx` : `afleweringsnota_${noteLabel(n)}.pdf`;
     const file = new File([blob], name, { type: blob.type });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: `Delivery note ${n.note_no}` });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: `Delivery note ${noteLabel(n)}` });
     else Boord.downloadBlob(blob, name);
   } catch (e) {
     if (e.name === "AbortError") return; // closed the share sheet

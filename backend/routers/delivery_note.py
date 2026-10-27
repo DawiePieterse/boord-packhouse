@@ -251,7 +251,7 @@ def _draw(n: DeliveryNote, pages: int):
         room = pdf.get_string_width(title) + 6
         text(11, title, "B", h=7, w=room)
         pdf.set_text_color(200, 0, 0)
-        text(14, str(n.note_no), "B", h=7, w=30)
+        text(14, export_forms.note_label(n), "B", h=7, w=30)
         text(14, f"page {pdf.page_no()} of {pages}", "B", h=7, w=w - room - 30, align="R")
         pdf.set_text_color(0, 0, 0)
         pdf.ln()
@@ -373,7 +373,7 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     if n is None or n.removed:
         raise HTTPException(404, "No such delivery note")
     pdf = _draw(n, _draw(n, 1).page_no())
-    name = f"afleweringsnota_{n.note_no}.pdf"
+    name = f"afleweringsnota_{export_forms.note_label(n)}.pdf"
     return Response(bytes(pdf.output()), media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
@@ -409,12 +409,5 @@ def note_export_forms(uuid: str, market: str, session: Session = Depends(get_pac
     """The note's pallets on the market's export papers, drawn as the farm's forms."""
     n = _live(uuid, session)
     name, target = _export(market, session)
-    return _xlsx(export_forms.forms(n, target, name), f"{market}_forms_{n.note_no}.xlsx")
+    return _xlsx(export_forms.forms(n, target, name), f"{market}_forms_{export_forms.note_label(n)}.xlsx")
 
-
-@router.get("/{uuid}/{market}.xlsx")
-def note_export(uuid: str, market: str, session: Session = Depends(get_packhouse_session)):
-    """The same papers as plain tables."""
-    n = _live(uuid, session)
-    name, target = _export(market, session)
-    return _xlsx(export_forms.simple(n, target, name), f"{market}_{n.note_no}.xlsx")

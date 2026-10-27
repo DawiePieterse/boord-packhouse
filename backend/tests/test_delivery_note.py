@@ -74,7 +74,7 @@ def test_pdf_is_the_paper_note(client, pallets):
     sync(client, note(pallets=("p1", "p2"), cooled_to="8"))
     r = client.get("/api/deliverynote/n1/pdf")
     assert r.status_code == 200 and r.content.startswith(b"%PDF")
-    assert "afleweringsnota_1335.pdf" in r.headers["content-disposition"]
+    assert "afleweringsnota_LW-1335.pdf" in r.headers["content-disposition"]  # USA pallets: LW
     assert client.get("/api/deliverynote/nope/pdf").status_code == 404
 
 
@@ -121,33 +121,21 @@ def test_last_number_follows_notes_and_settings_can_change_it(client, admin_clie
     assert last() == 1341  # cleared: the highest note ever used
 
 
-def test_usa_papers_list_every_pallet_line(client, pallets):
-    from io import BytesIO
-
-    from openpyxl import load_workbook
-    sync(client, note(pallets=("p1", "p2")))
-    r = client.get("/api/deliverynote/n1/usa.xlsx")
-    assert r.status_code == 200 and 'usa_1335.xlsx' in r.headers["content-disposition"]
-    wb = load_workbook(BytesIO(r.content))
-    assert wb.sheetnames == ["Phyto", "Consignment", "Inspection Sheet"]
-    rows = [row for row in wb["Phyto"].iter_rows(values_only=True) if row[0] in (1, 2)]
-    assert [(row[1], row[2], row[8]) for row in rows] == [("060099005963004759", "D2087", "001"), ("B2", "D2087", "002")]
-    assert client.get("/api/deliverynote/nope/usa.xlsx").status_code == 404
-
-
 def test_usa_forms_are_drawn_from_the_note(client, pallets):
     from io import BytesIO
 
     from openpyxl import load_workbook
     sync(client, note(pallets=("p1", "p2")))
     r = client.get("/api/deliverynote/n1/usa_forms.xlsx")
-    assert r.status_code == 200 and 'usa_forms_1335.xlsx' in r.headers["content-disposition"]
+    assert r.status_code == 200 and 'usa_forms_LW-1335.xlsx' in r.headers["content-disposition"]
     wb = load_workbook(BytesIO(r.content))
     assert wb.sheetnames == ["Phyto", "Consignment", "Inspection Sheet"]
     p, c, ins = wb["Phyto"], wb["Consignment"], wb["Inspection Sheet"]
     assert (p["D5"].value, p["B19"].value, p["J20"].value, p["F16"].value, p["B21"].value) == (
-        "LW 1335", "060099005963004759", "002", 120, None)
-    assert (c["J4"].value, c["C14"].value, c["E4"].value, c["K15"].value) == ("LW 1335", "B2", "Boeretrust", 120)
+        "LW-1335", "060099005963004759", "002", 120, None)
+    assert (c["J4"].value, c["C14"].value, c["E4"].value, c["K15"].value) == ("LW-1335", "B2", "Boeretrust", 120)
+    assert client.get("/api/deliverynote/nope/usa_forms.xlsx").status_code == 404
+    assert client.get("/api/deliverynote/n1/usa.xlsx").status_code == 404  # no simple sheets
     assert (ins["A11"].value, ins["D11"].value) == ("B2", "USA")
 
 
@@ -181,7 +169,18 @@ def test_eu_papers_have_no_phyto_and_their_own_target_receiver(client, admin_cli
     assert wb.sheetnames == ["Consignment", "Inspection Sheet"]
     c, ins = wb["Consignment"], wb["Inspection Sheet"]
     assert (c["J7"].value, c["J8"].value, ins["D10"].value) == ("EU", "Rotterdam Fresh", "EU")
-    simple = load_workbook(BytesIO(client.get("/api/deliverynote/n1/eu.xlsx").content))
-    assert simple.sheetnames == ["Consignment", "Inspection Sheet"]
     assert load_workbook(BytesIO(client.get("/api/deliverynote/n1/usa_forms.xlsx").content))["Consignment"]["J8"].value == "Seasons"
     assert client.get("/api/deliverynote/n1/uk_forms.xlsx").status_code == 404
+
+
+def test_the_number_is_b_for_local_and_lw_for_export():
+    import json as _json
+
+    from export_forms import note_label
+    from models import DeliveryNote
+
+    def label(*markets):
+        return note_label(DeliveryNote(uuid="x", note_no=1335, created_at=datetime.now(),
+                                       pallets=_json.dumps([{"market_name": m} for m in markets])))
+    assert (label("Local"), label("USA Sea Freight"), label("EU Air Freight"), label("Local", "EU Sea Freight"),
+            label("Europe")) == ("B-1335", "LW-1335", "LW-1335", "LW-1335", "B-1335")

@@ -3,15 +3,14 @@
 The USA gets three papers: DAFF's accompanying document for the phyto
 inspection, the consignment note and PPECB's litchi inspection findings
 sheet. The EU gets the same but no phyto document. One row per pallet line,
-in two versions:
-- forms(): drawn as the farm's paper forms ("Lw 2290 #41"), one style
-  throughout, A4 portrait, the Phyto form on one page;
-- simple(): the same data as plain tables.
+drawn by forms() as the farm's paper forms ("Lw 2290 #41"), one style
+throughout, A4 portrait, the Phyto form on one page.
 The farm's registration numbers are printed here, as the delivery note's
 sender is in routers/delivery_note.py.
 """
 import io
 import json
+import re
 from datetime import date
 from pathlib import Path
 
@@ -38,6 +37,16 @@ FINDINGS = ["Decay", "Torn out stems", "Injuries", "Blemishes", "Sooty mould", "
             "Absence of stems", "Long stem", "Fruit age", "Bruto mass", "Smaller 22 mm", "Uniformity", "Min. diameter"]
 
 
+EXPORT_MARKET = re.compile(r"\b(usa|eu)\b", re.I)  # a pallet's market name that makes it export
+
+
+def note_label(n) -> str:
+    """The note's number as printed: LW-1335 when it carries export (USA or EU)
+    pallets, else B-1335 (local). One series of numbers; only the prefix differs."""
+    export = any(EXPORT_MARKET.search(p.get("market_name") or "") for p in json.loads(n.pallets or "[]"))
+    return f"{'LW' if export else 'B'}-{n.note_no}"
+
+
 def _count(pack: str) -> str:
     """The size count (XL) out of the pack's name (Rhino 4.5 kg XL)."""
     return next((w for w in pack.upper().replace(",", " ").split() if w in SIZES), "")
@@ -57,7 +66,7 @@ def export_rows(pallets: list) -> list:
 def _facts(n, target: str, market: str):
     pallets = json.loads(n.pallets or "[]")
     rows = export_rows(pallets)
-    return {"rows": rows, "doc_no": f"LW {n.note_no}", "pallets": len(pallets),
+    return {"rows": rows, "doc_no": note_label(n), "pallets": len(pallets),
             "cartons": sum(r["cartons"] for r in rows),
             "day": date.fromisoformat(n.loaded_on).strftime("%d/%m/%Y") if n.loaded_on else "",
             "varieties": ", ".join(sorted({r["variety"] for r in rows if r["variety"]})),
@@ -359,72 +368,3 @@ def forms(n, target: str = "", market: str = "USA") -> bytes:
     _inspection(wb, f)
     return _bytes(wb)
 
-
-def simple(n, target: str = "", market: str = "USA") -> bytes:
-    """The same papers as plain tables, one row per pallet line."""
-    f = _facts(n, target, market)
-    rows, doc_no, day, cartons = f["rows"], f["doc_no"], f["day"], f["cartons"]
-    bold = Font(bold=True)
-    wb = Workbook()
-    wb.remove(wb.active)
-
-    def sheet(ws, title, head, body, widths):
-        ws.title = title
-        for line in head:
-            ws.append(line)
-        ws.append([])
-        top = ws.max_row + 1
-        for line in body:
-            ws.append(line)
-        for cell in ws[top]:
-            cell.font = bold
-        ws["A1"].font = Font(bold=True, size=13)
-        for i, w in enumerate(widths):
-            ws.column_dimensions[chr(65 + i)].width = w
-        ws.print_title_rows = f"{top}:{top}"  # each printed page repeats the column heads
-        ws.page_setup.orientation = "landscape"
-        ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
-        ws.sheet_properties.pageSetUpPr.fitToPage = True
-
-    if market == "USA":  # the EU has no phyto document
-        sheet(wb.create_sheet(), "Phyto", [
-            ["ACCOMPANYING DOCUMENT FOR PHYTOSANITARY INSPECTIONS FOR FRESH FRUIT"],
-            ["Document No / Series No", doc_no, "", "Inspection Date", day],
-            ["Commodity", "Litchis", "", "Importing Country", "USA"],
-            ["Exporting Company & contact details", ", ".join(EXPORTER)],
-            ["Producer's Address", ", ".join(PRODUCER)],
-            ["Magisterial District", PRODUCER[-1], "", "Inspection Depot", INSPECTION_POINT],
-            ["Packhouse Code", PHC, "", "Packhouse Person's Contact Details", PACKHOUSE_CONTACT],
-            ["Intake Document No.", doc_no, "", "PUCs", PUC, "Total Cartons", cartons, "Total Pallets", f["pallets"]],
-        ], [["#", "Pallet ID", "PUC", "Variety", "Block No", "Carton Quantity", "Date code", "Count", "Pallet Nr"]]
-           + [[i + 1, r["pallet_id"], PUC, r["variety"], r["block"], r["cartons"], r["date_code"], r["count"], r["pallet_no"]]
-              for i, r in enumerate(rows)]
-           + [[], ["", "Results of Inspection"], ["", "Signature of DAFF Inspector:"], ["", "Signature of foreign Inspector:"]],
-              [5, 22, 9, 26, 10, 15, 10, 8, 14])
-
-    sheet(wb.create_sheet(), "Consignment", [
-        ["CONSIGNMENT NOTE", "", "", "", "", "Consignment nr:", doc_no],
-        ["Sender:", SENDER[0], "", "Receiver:", ", ".join(f["receiver"]), "PUC Code:", PUC],
-        ["", ", ".join(SENDER[1:]), "", "", "", "PHC Code:", PHC],
-        ["Date:", day, "", "", "", "GGN Nr:", GGN],
-        ["", "", "", "", "", "Inspection point nr:", INSPECTION_POINT],
-        ["", "", "", "", "", "Target market:", f["market"]],
-        ["", "", "", "", "", "Target receiver:", ", ".join(f["target"].split("\n"))],
-    ], [["#", "Pallet nr", "Pallet Id", "Start date", "Commodity", "Variety", "Grade", "Count", "Block nr", "Package type", "Units"]]
-       + [[i + 1, r["pallet_no"], r["pallet_id"], r["date_code"], "Litchis", r["variety"], "Class 1", r["count"],
-           r["block"], r["pack"], r["cartons"]] for i, r in enumerate(rows)]
-       + [["", "", "", "", "", "", "", "", "", "Total units", cartons], [],
-          ["Inspection Date:", day], ["Inspector nr:"], ["Contact Nr:"], ["Signature:"], [],
-          ["Driver Signature:", "", "", "Date:"], ["Receiving Signature:", "", "", "Date:"], ["", "", "", "", "", "", "", "", "Packhouse Representative"]],
-          [5, 10, 22, 10, 10, 18, 9, 8, 9, 16, 9])
-
-    sheet(wb.create_sheet(), "Inspection Sheet", [
-        ["PPECB INSPECTION FINDINGS SHEET - LITCHIS (PP04.01-05F08 L)"],
-        ["Inspector & No:", "", "Exporter:", EXPORTER[0], "PHC:", PHC, "PUC:", PUC],
-        ["Signature:", "", "Insp. point:", INSPECTION_POINT, "Date:", day],
-        ["Cultivar:", f["varieties"], "Product:", "Litchis", "Consignment note numbers:", doc_no],
-    ], [["Pallet barcode ID", "Net mass", "Class", "Target market"] + FINDINGS + ["C - Comply / R - Rejected"]]
-       + [[r["pallet_id"], "", 1, f["market"]] for r in rows]
-       + [[], ["Passed for Export Stickers:", "From:", "", "To:"], ["Remarks:"]],
-          [22, 9, 6, 10] + [9] * len(FINDINGS) + [12])
-    return _bytes(wb)
