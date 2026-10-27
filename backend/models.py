@@ -284,14 +284,24 @@ class Receiver(SQLModel, table=True):
     active: bool = True
 
 
+class TargetReceiver(SQLModel, table=True):
+    """Who an export load is for overseas: name, address and its market (USA
+    or EU), set up in Settings -> Delivery Note. An export note picks one of
+    its market's and copies it, printed on the consignment note (export_forms.py)."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    address: str = ""
+    market: str = "USA"         # USA or EU
+    sort: int = 0
+    active: bool = True
+
+
 class DeliveryNoteSettings(SQLModel, table=True):
     """Settings -> Delivery Note's numbers. One row."""
     id: Optional[int] = Field(default=None, primary_key=True)
     cooled_to: float = 8.0      # a new note's "Verkoel op", °C
     last_no: Optional[int] = None   # the last note number; a new note offers it + 1. Moves up by
                                     # itself as notes arrive, and Settings can set it (down too)
-    target_receiver: str = ""   # printed on the USA consignment note (export_forms.py), one per line
-    eu_target_receiver: str = ""    # and on the EU one
 
 
 class DeliveryNote(SQLModel, table=True):
@@ -310,6 +320,8 @@ class DeliveryNote(SQLModel, table=True):
     receiver: str = ""                   # Ontvanger, one per line
     transporter_id: Optional[int] = None
     transporter: str = ""
+    target_receiver_id: Optional[int] = None  # an export note's TargetReceiver, name and address
+    target_receiver: str = ""                 # copied, one per line
     seal_no: str = ""
     cooled_to: str = ""         # Verkoel op, in °C
     loaded_on: str = ""         # Oplaaidatum

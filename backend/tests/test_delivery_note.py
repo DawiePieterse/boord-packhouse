@@ -92,8 +92,11 @@ def test_options_come_from_settings_which_need_the_pin(client, admin_client):
         "agri Co", "Boeretrust", "Dapper", "Laughing Waters Lietsjies"]
     admin_client.put("/api/settings/transporters/1", json={"name": "Self", "active": False})
     assert admin_client.put("/api/settings/deliverynote", json={"cooled_to": 5}).json()["cooled_to"] == 5
-    admin_client.put("/api/settings/deliverynote", json={"cooled_to": 5, "target_receiver": " Seasons Farm Fresh "})
-    assert client.get("/api/deliverynote/options").json()["target_receiver"] == "Seasons Farm Fresh"
+    t = admin_client.post("/api/settings/targetreceivers", json={"name": " Seasons Farm Fresh ", "address": " Philadelphia ", "market": "usa"}).json()
+    assert (t["name"], t["address"], t["market"]) == ("Seasons Farm Fresh", "Philadelphia", "USA")
+    assert admin_client.post("/api/settings/targetreceivers", json={"name": "X", "market": "UK"}).status_code == 422
+    admin_client.post("/api/settings/targetreceivers", json={"name": "Old one", "market": "EU", "active": False})
+    assert [r["name"] for r in client.get("/api/deliverynote/options").json()["target_receivers"]] == ["Seasons Farm Fresh"]
     assert admin_client.put("/api/settings/deliverynote", json={"cooled_to": 99}).status_code == 422
     o = client.get("/api/deliverynote/options").json()
     assert ([t["name"] for t in o["transporters"]], len(o["receivers"]), o["cooled_to"]) == (["Go Fresh"], 4, 5)
@@ -164,19 +167,26 @@ def test_usa_forms_keep_phyto_on_one_page_and_print_the_target_receiver():
     assert (c["J8"].value, c["A8"].value, c["C10"].value) == ("Seasons Farm Fresh\nToronto", "PUC code", "4050373828202")
 
 
-def test_eu_papers_have_no_phyto_and_their_own_target_receiver(client, admin_client, pallets):
+def test_export_papers_print_the_notes_own_target_receiver(client, admin_client, pallets):
     from io import BytesIO
 
     from openpyxl import load_workbook
-    sync(client, note(pallets=("p1", "p2")))
-    admin_client.put("/api/settings/deliverynote", json={"cooled_to": 8, "target_receiver": "Seasons",
-                                                         "eu_target_receiver": "Rotterdam Fresh"})
+    t = admin_client.post("/api/settings/targetreceivers", json={"name": "Rotterdam Fresh", "market": "EU"}).json()
+    sync(client, note(pallets=("p1", "p2"), target_receiver_id=t["id"], target_receiver="Rotterdam Fresh\nRotterdam"))
     wb = load_workbook(BytesIO(client.get("/api/deliverynote/n1/eu_forms.xlsx").content))
     assert wb.sheetnames == ["Consignment", "Inspection Sheet"]
     c, ins = wb["Consignment"], wb["Inspection Sheet"]
-    assert (c["J7"].value, c["J8"].value, ins["D10"].value) == ("EU", "Rotterdam Fresh", "EU")
-    assert load_workbook(BytesIO(client.get("/api/deliverynote/n1/usa_forms.xlsx").content))["Consignment"]["J8"].value == "Seasons"
+    assert (c["J7"].value, c["J8"].value, ins["D10"].value) == ("EU", "Rotterdam Fresh\nRotterdam", "EU")
     assert client.get("/api/deliverynote/n1/uk_forms.xlsx").status_code == 404
+    # In use on a note: retire it, don't delete it.
+    assert admin_client.delete(f"/api/settings/targetreceivers/{t['id']}").status_code == 409
+
+
+def test_a_local_note_has_no_target_receiver(client, pallets):
+    sync_pallets(client, pallets=[pallet("p3", barcode="B3", market_id=5, market_name="Local")])
+    sync(client, note(pallets=("p3",), target_receiver_id=1, target_receiver="Someone"))
+    [n] = notes(client)
+    assert (n["target_receiver_id"], n["target_receiver"]) == (None, "")
 
 
 def test_the_number_is_b_for_local_and_lw_for_export():

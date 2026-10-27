@@ -365,7 +365,7 @@ def _inspection(wb, f):
 
 
 def forms(n, target: str = "", market: str = "USA") -> bytes:
-    """The papers drawn as the farm's forms; target is Settings' target receiver for the market."""
+    """The papers drawn as the farm's forms; target is the note's target receiver."""
     f = _facts(n, target, market)
     wb = Workbook()
     wb.remove(wb.active)

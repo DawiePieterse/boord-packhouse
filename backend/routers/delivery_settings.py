@@ -1,5 +1,5 @@
-"""Settings -> Delivery Note: the transporters and receivers the note offers,
-and the cooled-to temperature a new note starts with. Behind the PIN.
+"""Settings -> Delivery Note: the transporters, receivers and target receivers
+the note offers, and the cooled-to temperature a new note starts with. Behind the PIN.
 
 The packs' rules (consignment_settings.py): a retired one (active = false)
 leaves the screen, notes keep what they copied, and delete is only for one no
@@ -12,7 +12,7 @@ from sqlmodel import Session, SQLModel, func, select
 
 from admin_auth import require_admin
 from db import get_packhouse_session
-from models import DeliveryNote, DeliveryNoteSettings, Receiver, Transporter
+from models import DeliveryNote, DeliveryNoteSettings, Receiver, TargetReceiver, Transporter
 from routers.consignment_settings import _save
 
 router = APIRouter(prefix="/api/settings", tags=["settings"], dependencies=[Depends(require_admin)])
@@ -30,11 +30,16 @@ class ReceiverIn(SQLModel):
     active: bool = True
 
 
+class TargetReceiverIn(SQLModel):
+    name: str
+    address: str = ""
+    market: str = "USA"
+    active: bool = True
+
+
 class DeliverySettingsIn(SQLModel):
     cooled_to: float
     last_no: Optional[int] = None
-    target_receiver: str = ""
-    eu_target_receiver: str = ""
 
 
 def _delete(session: Session, model, column, row_id: int):
@@ -90,6 +95,33 @@ def delete_receiver(row_id: int, session: Session = Depends(get_packhouse_sessio
     return _delete(session, Receiver, DeliveryNote.receiver_id, row_id)
 
 
+@router.get("/targetreceivers")
+def all_target_receivers(session: Session = Depends(get_packhouse_session)):
+    return session.exec(select(TargetReceiver).order_by(func.lower(TargetReceiver.name), TargetReceiver.id)).all()
+
+
+def _target_in(body: TargetReceiverIn) -> TargetReceiverIn:
+    body.address, body.market = body.address.strip(), body.market.strip().upper()
+    if body.market not in ("USA", "EU"):
+        raise HTTPException(422, "The market is USA or EU")
+    return body
+
+
+@router.post("/targetreceivers")
+def add_target_receiver(body: TargetReceiverIn, session: Session = Depends(get_packhouse_session)):
+    return _save(session, TargetReceiver, None, _target_in(body))
+
+
+@router.put("/targetreceivers/{row_id}")
+def update_target_receiver(row_id: int, body: TargetReceiverIn, session: Session = Depends(get_packhouse_session)):
+    return _save(session, TargetReceiver, row_id, _target_in(body))
+
+
+@router.delete("/targetreceivers/{row_id}")
+def delete_target_receiver(row_id: int, session: Session = Depends(get_packhouse_session)):
+    return _delete(session, TargetReceiver, DeliveryNote.target_receiver_id, row_id)
+
+
 @router.put("/deliverynote")
 def save_delivery_settings(body: DeliverySettingsIn, session: Session = Depends(get_packhouse_session)):
     if not -5 <= body.cooled_to <= 30:
@@ -98,7 +130,6 @@ def save_delivery_settings(body: DeliverySettingsIn, session: Session = Depends(
         raise HTTPException(422, "The last note number is a whole number from 1")
     row = session.get(DeliveryNoteSettings, 1) or DeliveryNoteSettings(id=1)
     row.cooled_to, row.last_no = body.cooled_to, body.last_no
-    row.target_receiver, row.eu_target_receiver = body.target_receiver.strip(), body.eu_target_receiver.strip()
     session.add(row)
     session.commit()
     session.refresh(row)

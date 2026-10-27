@@ -86,9 +86,10 @@ function openNote(note) {
   dn.view = "note";
   dn.draft = note
     ? { uuid: note.uuid, note, no: String(note.note_no), receiver_id: note.receiver_id, transporter_id: note.transporter_id,
+        target_receiver_id: note.target_receiver_id == null ? null : note.target_receiver_id,
         seal_no: note.seal_no, cooled_to: note.cooled_to, loaded_on: note.loaded_on, offloaded_on: note.offloaded_on,
         picked: note.pallets.map((p) => p.uuid) }
-    : { uuid: Boord.uuid(), note: null, no: nextNoteNo(), receiver_id: null, transporter_id: null, seal_no: "",
+    : { uuid: Boord.uuid(), note: null, no: nextNoteNo(), receiver_id: null, transporter_id: null, target_receiver_id: null, seal_no: "",
         cooled_to: opts.cooled_to == null ? "" : String(opts.cooled_to), loaded_on: dnToday(), offloaded_on: dayAfter(dnToday()), picked: [] };
   renderDeliveryNote();
 }
@@ -97,6 +98,11 @@ function openNote(note) {
 // editing an old note loses nothing (withOwn from consignment.js).
 const receiverChoices = (d) => withOwn(Store.noteOptions().receivers || [],
   d.note && d.note.receiver_id != null && { id: d.note.receiver_id, name: d.note.receiver.split("\n")[0], text: d.note.receiver });
+// An export note's target receivers: Settings' for its market (USA or EU),
+// plus its own pick if since retired.
+const targetText = (t) => [t.name, t.address].filter(Boolean).join("\n");
+const targetChoices = (d, group) => withOwn((Store.noteOptions().target_receivers || []).filter((t) => t.market === groupTitle(group)),
+  d.note && d.note.target_receiver_id != null && { id: d.note.target_receiver_id, name: d.note.target_receiver.split("\n")[0], text: d.note.target_receiver });
 const transporterChoices = (d) => withOwn(Store.noteOptions().transporters || [],
   d.note && d.note.transporter_id != null && { id: d.note.transporter_id, name: d.note.transporter });
 
@@ -149,6 +155,8 @@ function noteForm() {
         ${label("Transporter", select("transporter", transporterChoices(d), d.transporter_id, "Transporter...", (r) => r.name), "flex-1 min-w-0")}
       </div>
       ${label("Receiver", select("receiver", receiverChoices(d), d.receiver_id, "Receiver...", (r) => (r.text || receiverText(r)).split("\n").join(" · ")))}
+      ${locked && locked !== "local" ? label(`Target receiver (${groupTitle(locked)})`,
+          select("target_receiver", targetChoices(d, locked), d.target_receiver_id, "Target receiver...", (t) => (t.text || targetText(t)).split("\n").join(" · "))) : ""}
       <div class="flex gap-2">
         ${label("Seal no", `<span class="flex gap-2">${input("seal_no", `placeholder="Scan or type"`)}
           <button type="button" data-scanseal title="Scan the seal's barcode" class="px-3 rounded-lg border border-slate-300"><i class="fa-solid fa-barcode text-xl"></i></button></span>`, "flex-1 min-w-0")}
@@ -231,19 +239,24 @@ async function saveNote() {
   if (!d.loaded_on) return fail("Pick the loading date.");
   if (!pallets.length) return fail("Tick the pallets in this delivery.");
   if (new Set(pallets.map((p) => marketGroup(p.market_name))).size > 1) return fail("Untick the pallets of the other market: a delivery is all USA, all EU or all local.");
+  // An export note's target receiver, if picked from its market's (a pick left over
+  // from pallets of another market falls away).
+  const group = marketGroup(pallets[0].market_name);
+  const target = group === "local" ? null : targetChoices(d, group).find((t) => t.id === d.target_receiver_id);
   const op = Operator.current() || {};
   const base = d.note || { kind: "delivery_note", created_at: new Date(Store.now()).toISOString(),
                            made_by: op.id || "", made_by_name: op.name || "" };
   await Store.saveRun({ ...base, kind: "delivery_note", uuid: d.uuid, note_no: no,
                         receiver_id: receiver.id, receiver: receiver.text || receiverText(receiver),
                         transporter_id: transporter.id, transporter: transporter.name,
+                        target_receiver_id: target ? target.id : null, target_receiver: target ? target.text || targetText(target) : "",
                         seal_no: d.seal_no.trim(), cooled_to: d.cooled_to.trim(),
                         loaded_on: d.loaded_on, offloaded_on: d.offloaded_on, pallets,
                         changed_by: op.id || "", changed_by_name: op.name || "", removed: false, rev: Date.now() });
-  // A new note goes back to the overview, where it now shows; an edited one
-  // stays open, so it can be printed or shared at once.
-  if (!d.note) { dn.view = "list"; renderDeliveryNote(); window.scrollTo(0, 0); }
-  else openNote(Store.notes().find((n) => n.uuid === d.uuid));
+  // Back to the overview, where the note now shows; tap it there to print or share it.
+  dn.view = "list";
+  renderDeliveryNote();
+  window.scrollTo(0, 0);
 }
 
 async function removeNote() {
@@ -325,7 +338,7 @@ function onDeliveryInput(ev) {
   const f = ev.target.dataset.field;
   if (!f) return;
   const v = ev.target.value;
-  if (f === "receiver" || f === "transporter") dn.draft[`${f}_id`] = v ? Number(v) : null;
+  if (f === "receiver" || f === "transporter" || f === "target_receiver") dn.draft[`${f}_id`] = v ? Number(v) : null;
   else if (f === "no") { dn.draft.no = v.replace(/\D/g, ""); ev.target.value = dn.draft.no; }
   else if (f === "loaded_on") {
     // The offload date follows the load date (the next day) until it is set by hand.
@@ -341,9 +354,11 @@ function onDeliveryInput(ev) {
 
 // ---- Settings -> Delivery Note ----------------------------------------------
 
-// One compact row a transporter or receiver: name (a receiver's market and
-// city beneath), In use, delete, save. The packs' rows (consignment.js), one
-// field more.
+// One compact row a transporter, receiver or target receiver: name (a
+// receiver's market and city beneath; a target receiver's USA or EU and
+// address), In use, delete, save. The packs' rows (consignment.js), one field more.
+const DN_KINDS = { transporters: ["New transporter", "Transporter"], receivers: ["New receiver", "Receiver, then its market and city"],
+                   targetreceivers: ["New target receiver", "Target receiver, then its market (USA or EU) and address"] };
 function dnSettingsRow(kind, row) {
   const isNew = row.id == null;
   const box = "border border-slate-300 rounded-lg px-2 py-2";
@@ -351,11 +366,15 @@ function dnSettingsRow(kind, row) {
       <div class="flex gap-1.5 mt-1.5">
         <input name="market" value="${esc(row.market)}" placeholder="Market" class="flex-1 min-w-0 ${box}">
         <input name="city" value="${esc(row.city)}" placeholder="City" class="flex-1 min-w-0 ${box}">
+      </div>` : kind === "targetreceivers" ? `
+      <div class="flex gap-1.5 mt-1.5">
+        <select name="market" class="w-20 shrink-0 ${box}">${["USA", "EU"].map((m) => `<option${row.market === m ? " selected" : ""}>${m}</option>`).join("")}</select>
+        <input name="address" value="${esc(row.address)}" placeholder="Address" class="flex-1 min-w-0 ${box}">
       </div>` : "";
   return `
     <form class="py-2" data-dn-form="${kind}" data-id="${isNew ? "new" : row.id}">
       <div class="flex items-center gap-1.5">
-        <input name="name" value="${esc(row.name)}" placeholder="${isNew ? (kind === "receivers" ? "New receiver" : "New transporter") : ""}" class="flex-1 min-w-0 font-semibold ${box}">
+        <input name="name" value="${esc(row.name)}" placeholder="${isNew ? DN_KINDS[kind][0] : ""}" class="flex-1 min-w-0 font-semibold ${box}">
         ${isNew ? `<span class="w-10 shrink-0"></span><span class="w-10 shrink-0"></span>`
           : `<label class="w-10 shrink-0 flex justify-center" title="In use"><input name="active" type="checkbox"${row.active ? " checked" : ""} class="w-5 h-5"></label>
              <button type="button" data-dn-delete title="Delete" class="w-10 h-10 shrink-0 rounded-lg border border-red-300 text-red-700"><i class="fa-solid fa-trash-can"></i></button>`}
@@ -365,25 +384,24 @@ function dnSettingsRow(kind, row) {
 }
 
 function dnSettingsCard(kind, rows) {
-  const head = `<div class="flex gap-1.5 pt-3 text-xs text-slate-500"><span class="flex-1">${kind === "receivers" ? "Receiver, then its market and city" : "Transporter"}</span>`
+  const head = `<div class="flex gap-1.5 pt-3 text-xs text-slate-500"><span class="flex-1">${DN_KINDS[kind][1]}</span>`
     + `<span class="w-10 shrink-0 text-center">In use</span><span class="w-10 shrink-0"></span><span class="w-14 shrink-0"></span></div>`;
   return `<div class="bg-white rounded-2xl shadow px-3 pb-1 divide-y divide-slate-100">${head}`
-    + rows.map((r) => dnSettingsRow(kind, r)).join("") + dnSettingsRow(kind, { id: null, name: "", market: "", city: "" }) + `</div>`;
+    + rows.map((r) => dnSettingsRow(kind, r)).join("") + dnSettingsRow(kind, { id: null, name: "", market: "", city: "", address: "" }) + `</div>`;
 }
 
 async function loadDeliverySettings() {
   try {
-    const [transporters, receivers, opts] = await Promise.all([Boord.api("/api/settings/transporters"),
-      Boord.api("/api/settings/receivers"), Boord.api("/api/deliverynote/options")]);
+    const [transporters, receivers, targets, opts] = await Promise.all([Boord.api("/api/settings/transporters"),
+      Boord.api("/api/settings/receivers"), Boord.api("/api/settings/targetreceivers"), Boord.api("/api/deliverynote/options")]);
     $("transporterSettings").innerHTML = dnSettingsCard("transporters", transporters);
     $("receiverSettings").innerHTML = dnSettingsCard("receivers", receivers);
+    $("targetReceiverSettings").innerHTML = dnSettingsCard("targetreceivers", targets);
     $("dnCooledTo").value = opts.cooled_to;
     $("dnLastNo").value = opts.last_no || "";
-    $("dnTargetReceiver").value = opts.target_receiver || "";
-    $("dnEuTargetReceiver").value = opts.eu_target_receiver || "";
   } catch (e) {
     if (e.status === 401) { unlocked = false; show(); }
-    else $("transporterSettings").innerHTML = $("receiverSettings").innerHTML = `<div class="text-sm text-slate-500">These can only be changed while the server can be reached.</div>`;
+    else $("transporterSettings").innerHTML = $("receiverSettings").innerHTML = $("targetReceiverSettings").innerHTML = `<div class="text-sm text-slate-500">These can only be changed while the server can be reached.</div>`;
   }
 }
 
@@ -404,9 +422,7 @@ function saveDeliverySetting(ev) {
   if (ev.target.id === "dnSettingsForm") {
     const last = $("dnLastNo").value.trim();
     dnSettingsCall("/api/settings/deliverynote", { method: "PUT", body: { cooled_to: Number($("dnCooledTo").value),
-                                                                          last_no: last ? Number(last) : null,
-                                                                          target_receiver: $("dnTargetReceiver").value,
-                                                                          eu_target_receiver: $("dnEuTargetReceiver").value } }, "Saved");
+                                                                          last_no: last ? Number(last) : null } }, "Saved");
     return;
   }
   const form = ev.target.closest("[data-dn-form]");
@@ -416,6 +432,7 @@ function saveDeliverySetting(ev) {
   const isNew = form.dataset.id === "new";
   const body = { name: f.get("name"), active: isNew ? true : f.get("active") === "on" };
   if (kind === "receivers") Object.assign(body, { market: f.get("market"), city: f.get("city") });
+  if (kind === "targetreceivers") Object.assign(body, { market: f.get("market"), address: f.get("address") });
   dnSettingsCall(`/api/settings/${kind}${isNew ? "" : `/${form.dataset.id}`}`, { method: isNew ? "POST" : "PUT", body }, isNew ? "Added" : "Saved");
 }
 

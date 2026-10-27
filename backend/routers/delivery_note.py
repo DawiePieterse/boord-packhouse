@@ -20,7 +20,7 @@ from sqlmodel import Session, SQLModel, func, select
 
 import export_forms
 from db import get_packhouse_session
-from models import DeliveryNote, DeliveryNoteSettings, Pallet, Receiver, Transporter
+from models import DeliveryNote, DeliveryNoteSettings, Pallet, Receiver, TargetReceiver, Transporter
 from routers.sulfur import _iso, _now, _utc_naive
 from routers.sulfur_report import _latin
 
@@ -38,6 +38,8 @@ class NoteIn(SQLModel):
     receiver: str = ""
     transporter_id: Optional[int] = None
     transporter: str = ""
+    target_receiver_id: Optional[int] = None   # an export note's, its name and address copied
+    target_receiver: str = ""
     seal_no: str = ""
     cooled_to: str = ""
     loaded_on: str = ""
@@ -139,6 +141,10 @@ def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
             row.receiver_id, row.transporter_id = rec.receiver_id, rec.transporter_id
             row.receiver, row.transporter, row.seal_no, row.cooled_to = rec.receiver, rec.transporter, rec.seal_no, rec.cooled_to
             row.loaded_on, row.offloaded_on = rec.loaded_on, rec.offloaded_on
+            # Only an export note has a target receiver.
+            export = export_forms.market_group(session.get(Pallet, _uuids(rec)[0]).market_name) != "local"
+            row.target_receiver_id = rec.target_receiver_id if export else None
+            row.target_receiver = rec.target_receiver.strip() if export else ""
         session.add(row)
         if not rec.removed:  # the last note number moves on past this one
             settings = session.get(DeliveryNoteSettings, 1)
@@ -163,8 +169,8 @@ def state(session: Session = Depends(get_packhouse_session)):
 
 @router.get("/options")
 def options(session: Session = Depends(get_packhouse_session)):
-    """What a new note picks from (Settings -> Delivery Note): the transporters
-    and receivers in use, the cooled-to temperature it starts with, and the
+    """What a new note picks from (Settings -> Delivery Note): the transporters,
+    receivers and target receivers in use, the cooled-to temperature it starts with, and the
     last note number (Settings', else the highest ever used: the phones only
     hold 90 days of notes), so the next one follows on after a quiet spell too."""
     def active(model):
@@ -172,9 +178,8 @@ def options(session: Session = Depends(get_packhouse_session)):
         return session.exec(select(model).where(model.active == True).order_by(func.lower(model.name), model.id)).all()  # noqa: E712
     settings = session.get(DeliveryNoteSettings, 1)
     return {"transporters": active(Transporter), "receivers": active(Receiver),
+            "target_receivers": active(TargetReceiver),
             "cooled_to": settings.cooled_to if settings else 8.0,
-            "target_receiver": settings.target_receiver if settings else "",
-            "eu_target_receiver": settings.eu_target_receiver if settings else "",
             "last_no": (settings.last_no if settings and settings.last_no
                         else session.exec(select(func.max(DeliveryNote.note_no))).one())}
 
@@ -397,23 +402,16 @@ def _live(uuid: str, session: Session) -> DeliveryNote:
     return n
 
 
-# The export markets with papers (export_forms.py): its name on them, and the
-# Settings field holding its target receiver.
-MARKETS = {"usa": ("USA", "target_receiver"), "eu": ("EU", "eu_target_receiver")}
-
-
-def _export(market: str, session: Session):
-    if market not in MARKETS:
-        raise HTTPException(404, "No papers for that market")
-    name, field = MARKETS[market]
-    settings = session.get(DeliveryNoteSettings, 1)
-    return name, getattr(settings, field) if settings else ""
+# The export markets with papers (export_forms.py), and the name on them.
+MARKETS = {"usa": "USA", "eu": "EU"}
 
 
 @router.get("/{uuid}/{market}_forms.xlsx")
 def note_export_forms(uuid: str, market: str, session: Session = Depends(get_packhouse_session)):
-    """The note's pallets on the market's export papers, drawn as the farm's forms."""
+    """The note's pallets on the market's export papers, drawn as the farm's forms,
+    with the note's own target receiver."""
+    if market not in MARKETS:
+        raise HTTPException(404, "No papers for that market")
     n = _live(uuid, session)
-    name, target = _export(market, session)
-    return _xlsx(export_forms.forms(n, target, name), f"{market}_forms_{export_forms.note_label(n)}.xlsx")
+    return _xlsx(export_forms.forms(n, n.target_receiver, MARKETS[market]), f"{market}_forms_{export_forms.note_label(n)}.xlsx")
 
