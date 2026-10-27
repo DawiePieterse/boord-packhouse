@@ -44,18 +44,19 @@ function renderDeliveryNote() {
   $("deliveryBody").innerHTML = dn.view === "note" ? noteForm() : notesView();
 }
 
+// The 30 newest notes under a heading per market group (USA, EU, Local),
+// newest first within each, each with its market.
 function notesView() {
-  const rows = Store.notes().slice(0, 30).map((n) => `
-    <button type="button" data-note="${esc(n.uuid)}" class="w-full text-left border-t py-2 active:bg-slate-50">
-      <div class="flex justify-between gap-3 items-baseline">
-        <div class="font-bold text-lg">Note ${esc(noteLabel(n))}</div>
-        <div class="text-sm shrink-0">${esc(dnDay(n.loaded_on))}</div>
-      </div>
-      <div class="text-sm truncate">${esc(n.receiver.split("\n")[0])}${n.transporter ? ` · ${esc(n.transporter)}` : ""}</div>
-      <div class="text-sm">${noteTotals(n.pallets)}</div>
-      <div class="text-xs text-slate-500 truncate">Pallets ${n.pallets.map((p) => esc(p.pallet_ref)).join(", ")}</div>
-      ${n.error ? `<div class="text-sm text-red-600 mt-1">Not saved: ${esc(n.error)}. Tap to fix it.</div>` : ""}
-    </button>`).join("");
+  const recent = Store.notes().slice(0, 30);
+  const rows = MARKET_GROUPS.map(([key, title]) => {
+    const group = recent.filter((n) => noteGroup(n) === key);
+    if (!group.length) return "";
+    return `
+    <div class="border-t-2 border-slate-300 pt-3 pb-1 flex justify-between items-baseline">
+      <div class="text-lg font-bold">${title}</div>
+      <div class="text-sm text-slate-500">${group.length} note${group.length === 1 ? "" : "s"}</div>
+    </div>` + group.map(noteRow).join("");
+  }).join("");
   return `
     <div class="bg-white rounded-2xl shadow p-4">
       <button type="button" data-addnote class="w-full boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-file-lines"></i> New delivery note</button>
@@ -67,6 +68,21 @@ function notesView() {
       </div>
       ${rows || `<div class="text-center text-slate-400 text-sm py-6 border-t">No delivery notes yet</div>`}
     </div>`;
+}
+
+function noteRow(n) {
+  return `
+    <button type="button" data-note="${esc(n.uuid)}" class="w-full text-left border-t py-2 active:bg-slate-50">
+      <div class="flex justify-between gap-3 items-baseline">
+        <div class="font-bold text-lg">Note ${esc(noteLabel(n))}</div>
+        <div class="text-sm shrink-0">${esc(dnDay(n.loaded_on))}</div>
+      </div>
+      <div class="text-sm font-semibold text-blue-800">${esc(noteMarkets(n))}</div>
+      <div class="text-sm truncate">${esc(n.receiver.split("\n")[0])}${n.transporter ? ` · ${esc(n.transporter)}` : ""}</div>
+      <div class="text-sm">${noteTotals(n.pallets)}</div>
+      <div class="text-xs text-slate-500 truncate">Pallets ${n.pallets.map((p) => esc(p.pallet_ref)).join(", ")}</div>
+      ${n.error ? `<div class="text-sm text-red-600 mt-1">Not saved: ${esc(n.error)}. Tap to fix it.</div>` : ""}
+    </button>`;
 }
 
 function openNote(note) {
@@ -129,7 +145,10 @@ function noteForm() {
   return `
     <div class="flex items-center gap-3">
       <button type="button" data-back class="px-3 py-2 rounded-lg border border-slate-300 bg-white"><i class="fa-solid fa-arrow-left"></i></button>
-      <div class="flex-1 font-semibold">${d.note ? `Delivery note ${esc(noteLabel(d.note))}` : "New delivery note"}</div>
+      <div class="flex-1 min-w-0">
+        <div class="font-semibold">${d.note ? `Delivery note ${esc(noteLabel(d.note))}` : "New delivery note"}</div>
+        ${picked.length ? `<div class="text-sm font-semibold text-blue-800">${esc(noteMarkets({ pallets: picked }))}</div>` : ""}
+      </div>
     </div>
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
       <div class="flex gap-2">
@@ -254,6 +273,10 @@ function marketGroup(name) {
   return hit ? hit[0] : "local";
 }
 const groupTitle = (key) => MARKET_GROUPS.find(([k]) => k === key)[1];
+// A note's group is its pallets' (one group to a note; an older mixed note
+// goes by its first pallet), and its market the pallets' market names.
+const noteGroup = (n) => (n.pallets.length ? marketGroup(n.pallets[0].market_name) : "local");
+const noteMarkets = (n) => [...new Set(n.pallets.map((p) => p.market_name).filter(Boolean))].join(", ") || groupTitle(noteGroup(n));
 
 // The note number's prefix: LW for a delivery of export (USA or EU)
 // pallets, B for local. One series of numbers, as export_forms.note_label.
