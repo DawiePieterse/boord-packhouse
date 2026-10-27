@@ -86,6 +86,8 @@ def test_options_come_from_settings_which_need_the_pin(client, admin_client):
     assert r.json()["name"] == "Dapper"
     admin_client.put("/api/settings/transporters/1", json={"name": "Self", "active": False})
     assert admin_client.put("/api/settings/deliverynote", json={"cooled_to": 5}).json()["cooled_to"] == 5
+    admin_client.put("/api/settings/deliverynote", json={"cooled_to": 5, "target_receiver": " Seasons Farm Fresh "})
+    assert client.get("/api/deliverynote/options").json()["target_receiver"] == "Seasons Farm Fresh"
     assert admin_client.put("/api/settings/deliverynote", json={"cooled_to": 99}).status_code == 422
     o = client.get("/api/deliverynote/options").json()
     assert ([t["name"] for t in o["transporters"]], len(o["receivers"]), o["cooled_to"]) == (["Go Fresh"], 3, 5)
@@ -149,7 +151,7 @@ def test_usa_forms_are_drawn_from_the_note(client, pallets):
     assert (ins["A11"].value, ins["D11"].value) == ("B2", "USA")
 
 
-def test_usa_forms_run_the_phyto_form_onto_more_pages():
+def test_usa_forms_keep_phyto_on_one_page_and_print_the_target_receiver():
     import json as _json
     from io import BytesIO
 
@@ -160,5 +162,9 @@ def test_usa_forms_run_the_phyto_form_onto_more_pages():
     line = {"cartons": 192, "packaging_name": "Rhino 4.5 kg XL", "carton_kg": 4.5}
     n = DeliveryNote(uuid="x", note_no=7, created_at=datetime.now(), loaded_on="2026-10-26", receiver="AgriLink",
                      pallets=_json.dumps([{"pallet_ref": str(k), "barcode": "", "date_code": "", "lines": [line]} for k in range(27)]))
-    wb = load_workbook(BytesIO(usa_forms.forms(n)))
-    assert wb.sheetnames[:3] == ["Phyto 1", "Phyto 2", "Phyto 3"] and wb["Phyto 3"]["A19"].value == 27
+    wb = load_workbook(BytesIO(usa_forms.forms(n, "Seasons Farm Fresh\nToronto")))
+    p = wb["Phyto"]
+    assert wb.sheetnames == ["Phyto", "Consignment", "Inspection Sheet"]
+    assert (p["A45"].value, p.page_setup.fitToHeight) == (27, 1)
+    c = wb["Consignment"]
+    assert (c["J8"].value, c["A8"].value, c["C10"].value) == ("Seasons Farm Fresh\nToronto", "PUC code", "4050373828202 (GlobalG.A.P.)")

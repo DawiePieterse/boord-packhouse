@@ -290,6 +290,7 @@ class DeliveryNoteSettings(SQLModel, table=True):
     cooled_to: float = 8.0      # a new note's "Verkoel op", °C
     last_no: Optional[int] = None   # the last note number; a new note offers it + 1. Moves up by
                                     # itself as notes arrive, and Settings can set it (down too)
+    target_receiver: str = ""   # printed on the USA consignment note (usa_forms.py), one per line
 
 
 class DeliveryNote(SQLModel, table=True):

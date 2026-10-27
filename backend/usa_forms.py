@@ -4,7 +4,7 @@ Two versions of the same three papers (DAFF's accompanying document for the
 phyto inspection, the consignment note and PPECB's litchi inspection findings
 sheet), one row per pallet line:
 - forms(): drawn as the farm's paper forms ("Lw 2290 #41"), one style
-  throughout, A4 portrait, the Phyto form a page per 13 pallet lines;
+  throughout, A4 portrait, the Phyto form on one page;
 - simple(): the same data as plain tables.
 The farm's registration numbers are printed here, as the delivery note's
 sender is in routers/delivery_note.py.
@@ -30,7 +30,7 @@ PUC, PHC, INSPECTION_POINT, GGN = "D2087", "D 12167", "6142", "4050373828202"
 PACKHOUSE_CONTACT = "0836276926"
 SIZES = ("XXXL", "XXL", "XL", "L", "M", "S", "MIX")
 LOGO = Path(__file__).resolve().parent / "templates" / "dalrrd_logo.jpeg"
-PHYTO_ROWS = 13  # pallet lines on one page of DAFF's form
+PHYTO_ROWS = 13  # the Phyto form's ruled pallet rows, at least; more lines get more rows
 FINDINGS = ["Decay", "Torn out stems", "Injuries", "Blemishes", "Sooty mould", "Incomplete sulphur", "Double litchis",
             "Absence of stems", "Long stem", "Fruit age", "Bruto mass", "Smaller 22 mm", "Uniformity", "Min. diameter"]
 
@@ -51,14 +51,15 @@ def usa_rows(pallets: list) -> list:
     return rows
 
 
-def _facts(n):
+def _facts(n, target: str):
     pallets = json.loads(n.pallets or "[]")
     rows = usa_rows(pallets)
     return {"rows": rows, "doc_no": f"LW {n.note_no}", "pallets": len(pallets),
             "cartons": sum(r["cartons"] for r in rows),
             "day": date.fromisoformat(n.loaded_on).strftime("%d/%m/%Y") if n.loaded_on else "",
             "varieties": ", ".join(sorted({r["variety"] for r in rows if r["variety"]})),
-            "receiver": [line for line in n.receiver.split("\n") if line.strip()][:6]}
+            "receiver": [line for line in n.receiver.split("\n") if line.strip()][:7],
+            "target": target.strip()}
 
 
 def _bytes(wb) -> bytes:
@@ -123,9 +124,11 @@ def _heights(ws, rows, h):
         ws.row_dimensions[r].height = h
 
 
-def _phyto(wb, f, page, pages):
-    """DAFF's accompanying document, one page of PHYTO_ROWS pallet lines."""
-    ws = _sheet(wb, f"Phyto {page}" if pages > 1 else "Phyto", [5, 11, 11, 9, 13, 8, 10, 10, 8, 10])
+def _phyto(wb, f):
+    """DAFF's accompanying document, on one page: every pallet line in it,
+    the rows still tall enough to write in, the page scaled to fit."""
+    ws = _sheet(wb, "Phyto", [5, 11, 11, 9, 13, 8, 10, 10, 8, 10])
+    ws.page_setup.fitToHeight = 1
     if LOGO.exists():
         logo = Image(str(LOGO))
         px = 9525  # EMU per pixel
@@ -140,10 +143,9 @@ def _phyto(wb, f, page, pages):
         anchor.pic.spPr.xfrm = Transform2D(off=Point2D(x=4 * px, y=4 * px), ext=PositiveSize2D(cx=175 * px, cy=72 * px))
         logo.anchor = anchor
         ws.add_image(logo)
-    ws.row_dimensions[1].height = 60
+    ws.row_dimensions[1].height = 56
     _put(ws, "F1:J1", "DIRECTORATE: INSPECTION SERVICES", "sub", box=False)
     _put(ws, "A2:J2", "ACCOMPANYING DOCUMENT FOR PHYTOSANITARY INSPECTIONS FOR FRESH FRUIT", "title", box=False)
-    _put(ws, "A3:J3", f"Page {page} of {pages}", "hint", box=False)
     _heights(ws, (2,), 24)
 
     # Left: the consignment. Right: for the PPECB inspector to fill in.
@@ -158,7 +160,7 @@ def _phyto(wb, f, page, pages):
         r = 5 + i
         _put(ws, f"A{r}:C{r}", label, "label")
         _put(ws, f"D{r}:E{r}", value)
-        ws.row_dimensions[r].height = 42 if "\n" in value else 22
+        ws.row_dimensions[r].height = 38 if "\n" in value else 20
     for i, (label, value) in enumerate(right):
         r = 6 + i
         _put(ws, f"F{r}:G{r}", label, "label")
@@ -173,16 +175,16 @@ def _phyto(wb, f, page, pages):
         _put(ws, ref, value, "cell")
     _heights(ws, (15, 16), 20)
 
-    # The pallets, PHYTO_ROWS a page, the empty rows still ruled.
+    # The pallets, at least PHYTO_ROWS rows, the empty ones still ruled.
     head = 18
     for col, title in zip(("A", "B:C", "D", "E", "F", "G", "H", "I", "J"),
                           ("#", "Pallet ID", "PUC", "Variety", "Block no", "Carton quantity", "Date code", "Count", "Pallet nr")):
         ref = f"{col.split(':')[0]}{head}:{col.split(':')[-1]}{head}" if ":" in col else f"{col}{head}"
         _put(ws, ref, title, "head")
     ws.row_dimensions[head].height = 30
-    start = (page - 1) * PHYTO_ROWS
-    for i in range(PHYTO_ROWS):
-        r, k = head + 1 + i, start + i
+    lines = max(PHYTO_ROWS, len(f["rows"]))
+    for k in range(lines):
+        r = head + 1 + k
         x = f["rows"][k] if k < len(f["rows"]) else None
         values = (k + 1, x["pallet_id"], PUC, x["variety"], x["block"], x["cartons"], x["date_code"], x["count"],
                   x["pallet_no"]) if x else ("",) * 9
@@ -191,21 +193,22 @@ def _phyto(wb, f, page, pages):
         ws.row_dimensions[r].height = 20
 
     # The inspectors' part.
-    r = head + PHYTO_ROWS + 2
+    r = head + lines + 2
     _put(ws, f"A{r}:E{r}", "Results of inspection", "head")
     _put(ws, f"F{r}:G{r}", "Onhold", "head")
     _put(ws, f"H{r}:J{r}", "Remarks / comments by DAFF", "head")
     _put(ws, f"A{r + 1}:E{r + 4}", "DAFF stamp", "hint", top=True)
     _put(ws, f"F{r + 1}:G{r + 4}")
     _put(ws, f"H{r + 1}:J{r + 4}")
-    _heights(ws, range(r + 1, r + 5), 20)
+    _heights(ws, range(r + 1, r + 5), 18)
+    _heights(ws, (3, 4, 14, 17, r - 1), 6)  # the gaps between blocks: the page is fitted to its height
     for i, (a, b) in enumerate((("TempTale", "Pallet nr"), ("Signature of DAFF inspector", "Signature of foreign inspector"))):
         q = r + 5 + i
         _put(ws, f"A{q}:B{q}", a, "label")
         _put(ws, f"C{q}:E{q}")
         _put(ws, f"F{q}:G{q}", b, "label")
         _put(ws, f"H{q}:J{q}")
-        ws.row_dimensions[q].height = 30
+        ws.row_dimensions[q].height = 28
 
 
 def _consignment(wb, f):
@@ -215,15 +218,23 @@ def _consignment(wb, f):
     _put(ws, "A3:D3", "Sender", "head")
     _put(ws, "E3:H3", "Receiver", "head")
     _put(ws, "I3:K3", "Consignment", "head")
-    codes = [("Consignment nr", f["doc_no"]), ("Date", f["day"]), ("PUC code", PUC), ("PHC code", PHC),
-             ("GGN (GlobalG.A.P.)", GGN), ("Inspection point", INSPECTION_POINT), ("Target market", "USA")]
-    for i, (label, value) in enumerate(codes):
+    sender = [(line, None) for line in SENDER] + [("PUC code", PUC), ("PHC code", PHC), ("GGN", f"{GGN} (GlobalG.A.P.)")]
+    codes = [("Consignment nr", f["doc_no"]), ("Date", f["day"]), ("Inspection point", INSPECTION_POINT),
+             ("Target market", "USA")]
+    for i, (a, b) in enumerate(sender):
         r = 4 + i
-        _put(ws, f"A{r}:D{r}", SENDER[i] if i < len(SENDER) else "")
+        if b is None:
+            _put(ws, f"A{r}:D{r}", a)
+        else:
+            _put(ws, f"A{r}:B{r}", a, "label")
+            _put(ws, f"C{r}:D{r}", b)
         _put(ws, f"E{r}:H{r}", f["receiver"][i] if i < len(f["receiver"]) else "")
-        _put(ws, f"I{r}", label, "label")
-        _put(ws, f"J{r}:K{r}", value)
-        ws.row_dimensions[r].height = 26 if len(label) > 16 else 18
+        if i < len(codes):
+            _put(ws, f"I{r}", codes[i][0], "label")
+            _put(ws, f"J{r}:K{r}", codes[i][1])
+        ws.row_dimensions[r].height = 18
+    _put(ws, "I8:I10", "Target receiver", "label", top=True)
+    _put(ws, "J8:K10", f["target"], top=True)
 
     head = 12
     titles = ("#", "Pallet nr", "Pallet ID", "Start date", "Commodity", "Variety", "Grade", "Count", "Block nr",
@@ -320,22 +331,20 @@ def _inspection(wb, f):
     ws.row_dimensions[r + 1].height = 60
 
 
-def forms(n) -> bytes:
-    """The three papers drawn as the farm's forms."""
-    f = _facts(n)
+def forms(n, target: str = "") -> bytes:
+    """The three papers drawn as the farm's forms; target is Settings' target receiver."""
+    f = _facts(n, target)
     wb = Workbook()
     wb.remove(wb.active)
-    pages = max(1, -(-len(f["rows"]) // PHYTO_ROWS))
-    for page in range(1, pages + 1):
-        _phyto(wb, f, page, pages)
+    _phyto(wb, f)
     _consignment(wb, f)
     _inspection(wb, f)
     return _bytes(wb)
 
 
-def simple(n) -> bytes:
+def simple(n, target: str = "") -> bytes:
     """The same papers as plain tables, one row per pallet line."""
-    f = _facts(n)
+    f = _facts(n, target)
     rows, doc_no, day, cartons = f["rows"], f["doc_no"], f["day"], f["cartons"]
     bold = Font(bold=True)
     wb = Workbook()
@@ -381,6 +390,7 @@ def simple(n) -> bytes:
         ["", "", "", "", "", "GlobalG.A.P. Certified"],
         ["", "", "", "", "", "Inspection point nr:", INSPECTION_POINT],
         ["", "", "", "", "", "Target market:", "USA"],
+        ["", "", "", "", "", "Target receiver:", ", ".join(f["target"].split("\n"))],
     ], [["#", "Pallet nr", "Pallet Id", "Start date", "Commodity", "Variety", "Grade", "Count", "Block nr", "Package type", "Units"]]
        + [[i + 1, r["pallet_no"], r["pallet_id"], r["date_code"], "Litchis", r["variety"], "Class 1", r["count"],
            r["block"], r["pack"], r["cartons"]] for i, r in enumerate(rows)]

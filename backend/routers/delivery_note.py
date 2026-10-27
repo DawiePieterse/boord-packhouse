@@ -170,6 +170,7 @@ def options(session: Session = Depends(get_packhouse_session)):
     settings = session.get(DeliveryNoteSettings, 1)
     return {"transporters": active(Transporter), "receivers": active(Receiver),
             "cooled_to": settings.cooled_to if settings else 8.0,
+            "target_receiver": settings.target_receiver if settings else "",
             "last_no": (settings.last_no if settings and settings.last_no
                         else session.exec(select(func.max(DeliveryNote.note_no))).one())}
 
@@ -389,15 +390,20 @@ def _live(uuid: str, session: Session) -> DeliveryNote:
     return n
 
 
+def _target(session: Session) -> str:
+    settings = session.get(DeliveryNoteSettings, 1)
+    return settings.target_receiver if settings else ""
+
+
 @router.get("/{uuid}/usa_forms.xlsx")
 def note_usa_forms(uuid: str, session: Session = Depends(get_packhouse_session)):
     """The note's pallets on the USA export papers, drawn as the farm's forms (usa_forms.py)."""
     n = _live(uuid, session)
-    return _xlsx(usa_forms.forms(n), f"usa_forms_{n.note_no}.xlsx")
+    return _xlsx(usa_forms.forms(n, _target(session)), f"usa_forms_{n.note_no}.xlsx")
 
 
 @router.get("/{uuid}/usa.xlsx")
 def note_usa(uuid: str, session: Session = Depends(get_packhouse_session)):
     """The same papers as plain tables."""
     n = _live(uuid, session)
-    return _xlsx(usa_forms.simple(n), f"usa_{n.note_no}.xlsx")
+    return _xlsx(usa_forms.simple(n, _target(session)), f"usa_{n.note_no}.xlsx")

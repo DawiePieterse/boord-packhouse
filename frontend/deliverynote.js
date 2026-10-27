@@ -327,6 +327,7 @@ async function loadDeliverySettings() {
     $("receiverSettings").innerHTML = dnSettingsCard("receivers", receivers);
     $("dnCooledTo").value = opts.cooled_to;
     $("dnLastNo").value = opts.last_no || "";
+    $("dnTargetReceiver").value = opts.target_receiver || "";
   } catch (e) {
     if (e.status === 401) { unlocked = false; show(); }
     else $("transporterSettings").innerHTML = $("receiverSettings").innerHTML = `<div class="text-sm text-slate-500">These can only be changed while the server can be reached.</div>`;
@@ -350,7 +351,8 @@ function saveDeliverySetting(ev) {
   if (ev.target.id === "dnSettingsForm") {
     const last = $("dnLastNo").value.trim();
     dnSettingsCall("/api/settings/deliverynote", { method: "PUT", body: { cooled_to: Number($("dnCooledTo").value),
-                                                                          last_no: last ? Number(last) : null } }, "Saved");
+                                                                          last_no: last ? Number(last) : null,
+                                                                          target_receiver: $("dnTargetReceiver").value } }, "Saved");
     return;
   }
   const form = ev.target.closest("[data-dn-form]");
