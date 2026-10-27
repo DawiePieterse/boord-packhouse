@@ -63,7 +63,7 @@ def test_barcode_is_unique_until_the_pallet_is_removed(client):
 
 
 @pytest.mark.parametrize("bad", [
-    {"consignment_uuid": "nope"}, {"lines": []},
+    {"consignment_uuid": "nope"}, {"barcode": "  "}, {"lines": []},
     {"pallet_ref": ""}, {"pallet_ref": "12"}, {"pallet_ref": "1234"}, {"pallet_ref": "12a"},
     {"supplier_id": None}, {"market_id": None}, {"market_id": 99},
     {"lines": [{**LINE, "cartons": 0}]}, {"lines": [{**LINE, "carton_kg": 0}]}, {"lines": [{**LINE, "packaging_name": ""}]},
@@ -156,7 +156,7 @@ def test_who_scanned_it_stays_and_who_changed_it_follows(client):
     assert state(client)["pallets"][0]["changed_by_name"] == "Lerato"
 
 
-def test_the_barcode_is_optional(client):
-    out = sync(client, [cons()], [pallet("p1", barcode=""), pallet("p2", barcode="  ")])
-    assert out["synced"] == ["c1", "p1", "p2"]  # two pallets without one: no clash
-    assert [p["barcode"] for p in state(client)["pallets"]] == ["", ""]
+def test_the_barcode_is_needed_but_an_old_pallet_without_one_can_go(client):
+    assert sync(client, [cons()], [pallet("p1", barcode="  ")])["rejected"][0]["error"] == "a pallet needs its scanned barcode"
+    # One saved without a barcode while it was optional (v0.39 - v0.45) can still be taken off.
+    assert sync(client, pallets=[pallet("p2", barcode="", removed=True)])["synced"] == ["p2"]
