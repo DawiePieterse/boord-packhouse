@@ -9,7 +9,7 @@ import json
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session, SQLModel, select
+from sqlmodel import Session, SQLModel, func, select
 
 from admin_auth import require_admin
 from db import get_packhouse_session
@@ -68,7 +68,7 @@ def _delete(session: Session, model, row_id: int):
 
 @router.get("/packaging")
 def all_packaging(session: Session = Depends(get_packhouse_session)):
-    return session.exec(select(Packaging).order_by(Packaging.sort, Packaging.id)).all()
+    return session.exec(select(Packaging).order_by(Packaging.carton_kg, func.lower(Packaging.name), Packaging.id)).all()
 
 
 @router.post("/packaging")

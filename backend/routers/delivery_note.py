@@ -168,7 +168,8 @@ def options(session: Session = Depends(get_packhouse_session)):
     last note number (Settings', else the highest ever used: the phones only
     hold 90 days of notes), so the next one follows on after a quiet spell too."""
     def active(model):
-        return session.exec(select(model).where(model.active == True).order_by(model.sort, model.id)).all()  # noqa: E712
+        # A to Z by name, capitals or not
+        return session.exec(select(model).where(model.active == True).order_by(func.lower(model.name), model.id)).all()  # noqa: E712
     settings = session.get(DeliveryNoteSettings, 1)
     return {"transporters": active(Transporter), "receivers": active(Receiver),
             "cooled_to": settings.cooled_to if settings else 8.0,

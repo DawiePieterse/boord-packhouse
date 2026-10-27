@@ -82,17 +82,21 @@ def test_pdf_is_the_paper_note_for_local_notes_only(client, pallets):
 
 def test_options_come_from_settings_which_need_the_pin(client, admin_client):
     o = client.get("/api/deliverynote/options").json()
-    assert ([t["name"] for t in o["transporters"]], o["cooled_to"], o["last_no"]) == (["Self", "Go Fresh"], 8.0, None)
-    assert (o["receivers"][1]["market"], o["receivers"][1]["city"]) == ("Tshwane Mark", "Pretoria")
+    assert ([t["name"] for t in o["transporters"]], o["cooled_to"], o["last_no"]) == (["Go Fresh", "Self"], 8.0, None)  # A to Z
+    assert [r["name"] for r in o["receivers"]] == ["Boeretrust", "Laughing Waters Lietsjies"]
+    assert (o["receivers"][0]["market"], o["receivers"][0]["city"]) == ("Tshwane Mark", "Pretoria")
     r = admin_client.post("/api/settings/receivers", json={"name": " Dapper ", "market": "Joburg Mark", "city": "Johannesburg"})
     assert r.json()["name"] == "Dapper"
+    admin_client.post("/api/settings/receivers", json={"name": "agri Co"})  # capitals or not, A to Z
+    assert [r["name"] for r in client.get("/api/deliverynote/options").json()["receivers"]] == [
+        "agri Co", "Boeretrust", "Dapper", "Laughing Waters Lietsjies"]
     admin_client.put("/api/settings/transporters/1", json={"name": "Self", "active": False})
     assert admin_client.put("/api/settings/deliverynote", json={"cooled_to": 5}).json()["cooled_to"] == 5
     admin_client.put("/api/settings/deliverynote", json={"cooled_to": 5, "target_receiver": " Seasons Farm Fresh "})
     assert client.get("/api/deliverynote/options").json()["target_receiver"] == "Seasons Farm Fresh"
     assert admin_client.put("/api/settings/deliverynote", json={"cooled_to": 99}).status_code == 422
     o = client.get("/api/deliverynote/options").json()
-    assert ([t["name"] for t in o["transporters"]], len(o["receivers"]), o["cooled_to"]) == (["Go Fresh"], 3, 5)
+    assert ([t["name"] for t in o["transporters"]], len(o["receivers"]), o["cooled_to"]) == (["Go Fresh"], 4, 5)
     admin_client.post("/api/admin/logout")
     assert client.get("/api/settings/receivers").status_code == 401
     assert client.put("/api/settings/deliverynote", json={"cooled_to": 5}).status_code == 401

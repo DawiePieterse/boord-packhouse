@@ -2,7 +2,7 @@
 workers (for the badge scan), the fruit sources received lately, and the
 active tents and acid baths. Open endpoints - the floor screens have no login."""
 from fastapi import APIRouter, Depends
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 import boord
 from db import get_packhouse_session
@@ -45,7 +45,9 @@ def list_baths(session: Session = Depends(get_packhouse_session)):
 
 @router.get("/packaging")
 def list_packaging(session: Session = Depends(get_packhouse_session)):
-    return session.exec(select(Packaging).where(Packaging.active == True).order_by(Packaging.sort, Packaging.id)).all()  # noqa: E712
+    # lightest carton first
+    return session.exec(select(Packaging).where(Packaging.active == True)
+                        .order_by(Packaging.carton_kg, func.lower(Packaging.name), Packaging.id)).all()  # noqa: E712
 
 
 @router.get("/markets")
