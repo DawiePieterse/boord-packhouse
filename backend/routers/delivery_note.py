@@ -487,3 +487,14 @@ def note_export_forms(uuid: str, market: str, session: Session = Depends(get_pac
     n = _live(uuid, session)
     return _xlsx(export_forms.forms(n, n.target_receiver, MARKETS[market]), f"{market}_forms_{export_forms.note_label(n)}.xlsx")
 
+
+@router.get("/{uuid}/{market}_forms.pdf")
+def note_export_forms_pdf(uuid: str, market: str, session: Session = Depends(get_packhouse_session)):
+    """The same papers as one PDF, every sheet a page (or more)."""
+    if market not in MARKETS:
+        raise HTTPException(404, "No papers for that market")
+    n = _live(uuid, session)
+    name = f"{market}_forms_{export_forms.note_label(n)}.pdf"
+    return Response(export_forms.forms_pdf(n, n.target_receiver, MARKETS[market]), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
