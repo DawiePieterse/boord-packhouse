@@ -49,8 +49,12 @@ def market_group(name: str) -> str:
 
 def note_label(n) -> str:
     """The note's number as printed: LW-1335 when it carries export (USA or EU)
-    pallets, else B-1335 (local). One series of numbers; only the prefix differs."""
+    pallets, else B-1335 (local): one series of numbers, only the prefix differs.
+    A juice note has its own series, J-0001 on."""
     export = any(EXPORT_MARKET.search(p.get("market_name") or "") for p in json.loads(n.pallets or "[]"))
+    juice = json.loads(getattr(n, "bins", None) or "[]")
+    if juice:
+        return f"J-{n.note_no:04d}"
     return f"{'LW' if export else 'B'}-{n.note_no}"
 
 

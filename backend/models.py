@@ -327,10 +327,35 @@ class DeliveryNote(SQLModel, table=True):
     loaded_on: str = ""         # Oplaaidatum
     offloaded_on: str = ""      # Aflaaidatum, optional
     pallets: str = "[]"
+    bins: str = "[]"            # or the juice bins and crates on it, copies like the pallets' ({uuid, container, bin_no, empty_kg, full_kg})
     made_by: str = ""           # Boord worker.id from the badge of who made it; never changes
     made_by_name: str = ""
     changed_by: str = ""
     changed_by_name: str = ""
     removed: bool = False
+    device: str = ""
+    synced_at: Optional[datetime] = None
+
+
+class JuiceBin(SQLModel, table=True):
+    """A juice bin, weighed on a phone: empty (its tare) and, later in the day,
+    full. Made with its own uuid and sent by POST /api/juice/sync like a
+    pallet: editable, the latest copy wins. bin_no is the number written on
+    the weigh sheet (88, 89, ...), offered as the highest this season + 1 and
+    unique among the season's live bins. A full bin goes on a delivery note.
+    A crate (container "crate", 2 kg empty to start) is weighed the same way and
+    numbered on its own."""
+    uuid: str = Field(primary_key=True)
+    container: str = "bin"      # bin or crate
+    bin_no: int
+    weighed_at: datetime
+    empty_kg: Optional[float] = None
+    full_kg: Optional[float] = None
+    made_by: str = ""
+    made_by_name: str = ""
+    changed_by: str = ""
+    changed_by_name: str = ""
+    removed: bool = False
+    bin_year: Optional[int] = None   # the season (farm-local year weighed), set once
     device: str = ""
     synced_at: Optional[datetime] = None

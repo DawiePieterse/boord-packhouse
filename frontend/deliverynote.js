@@ -2,8 +2,8 @@
 // notes, then one note to fill in - receiver and transporter (picked from
 // Settings -> Delivery Note), seal, cooled to, the loading and offloading
 // dates, and the pallets in this delivery, ticked off the Pallet Stack list and
-// shown as it shows them - and its PDF, laid out as the paper note, to print
-// or share.
+// shown as it shows them, or for the juice buyer the full juice bins
+// (juice.js) - and its PDF, laid out as the paper note, to print or share.
 //
 // Made on the phone with a uuid and queued in Store's outbox (kind
 // delivery_note), editable like a pallet (consignment.js): saving again
@@ -30,13 +30,19 @@ function dayAfter(v) {
 // The number is typed on the first note (carrying on from the paper book), and
 // every new note after it offers the last note number + 1: the server's (set
 // in Settings, or the highest it has had), or a note this phone has not sent yet.
-function nextNoteNo() {
-  const unsent = Store.notes().filter((n) => n.synced === 0).map((n) => n.note_no);
-  const last = Math.max(Store.noteOptions().last_no || 0, ...unsent);
+// Juice notes count on their own, from J-0001.
+const isJuiceNote = (n) => (n.bins || []).length > 0;
+function nextNoteNo(juice) {
+  const unsent = Store.notes().filter((n) => n.synced === 0 && isJuiceNote(n) === juice).map((n) => n.note_no);
+  const opts = Store.noteOptions();
+  const last = Math.max((juice ? opts.last_juice_no : opts.last_no) || 0, ...unsent);
+  if (juice) return String(last + 1).padStart(4, "0");
   return last ? String(last + 1) : "";
 }
 const receiverText = (r) => [r.name, r.market, r.city].filter(Boolean).join("\n");
-const noteTotals = (pallets) => `<b>${pallets.length}</b> pallet${pallets.length === 1 ? "" : "s"} · <b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b>`;
+const noteTotals = (pallets, bins = []) => (bins.length ? binsTotal(bins)
+  : `<b>${pallets.length}</b> pallet${pallets.length === 1 ? "" : "s"} · <b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b>`);
+const isExport = (group) => group === "usa" || group === "eu";
 
 function renderDeliveryNote() {
   stopSealScan(); // the form is redrawn: its camera box goes with it
@@ -89,22 +95,29 @@ function noteRow(n, dim) {
       </div>
       <div class="text-sm font-semibold text-blue-800">${esc(noteMarkets(n))}</div>
       <div class="text-sm truncate">${esc(n.receiver.split("\n")[0])}${n.transporter ? ` · ${esc(n.transporter)}` : ""}</div>
-      <div class="text-sm">${noteTotals(n.pallets)}</div>
-      <div class="text-xs text-slate-500 truncate">Pallets ${n.pallets.map((p) => esc(p.pallet_ref)).join(", ")}</div>
+      <div class="text-sm">${noteTotals(n.pallets, n.bins || [])}</div>
+      <div class="text-xs text-slate-500 truncate">${(n.bins || []).length ? esc(n.bins.map(binName).join(", "))
+        : `Pallets ${n.pallets.map((p) => esc(p.pallet_ref)).join(", ")}`}</div>
       ${n.error ? `<div class="text-sm text-red-600 mt-1">Not saved: ${esc(n.error)}. Tap to fix it.</div>` : ""}
     </button>`;
 }
 
-function openNote(note) {
+// A juice note (opened from the Juice screen) holds juice bins and has no
+// seal or cooled to; a new one starts with the receiver and transporter of
+// the last juice note. Any other note holds pallets.
+function openNote(note, juice = false) {
   const opts = Store.noteOptions();
+  const last = juice && Store.notes().find(isJuiceNote) || {};
   dn.view = "note";
   dn.draft = note
-    ? { uuid: note.uuid, note, no: String(note.note_no), receiver_id: note.receiver_id, transporter_id: note.transporter_id,
+    ? { uuid: note.uuid, note, juice: isJuiceNote(note), no: isJuiceNote(note) ? String(note.note_no).padStart(4, "0") : String(note.note_no),
+        receiver_id: note.receiver_id, transporter_id: note.transporter_id,
         target_receiver_id: note.target_receiver_id == null ? null : note.target_receiver_id,
         seal_no: note.seal_no, cooled_to: note.cooled_to, loaded_on: note.loaded_on, offloaded_on: note.offloaded_on,
-        picked: note.pallets.map((p) => p.uuid) }
-    : { uuid: Boord.uuid(), note: null, no: nextNoteNo(), receiver_id: null, transporter_id: null, target_receiver_id: null, seal_no: "",
-        cooled_to: opts.cooled_to == null ? "" : String(opts.cooled_to), loaded_on: dnToday(), offloaded_on: dayAfter(dnToday()), picked: [] };
+        picked: [...note.pallets, ...(note.bins || [])].map((p) => p.uuid) }
+    : { uuid: Boord.uuid(), note: null, juice, no: nextNoteNo(juice), receiver_id: last.receiver_id == null ? null : last.receiver_id,
+        transporter_id: last.transporter_id == null ? null : last.transporter_id, target_receiver_id: null, seal_no: "",
+        cooled_to: juice || opts.cooled_to == null ? "" : String(opts.cooled_to), loaded_on: dnToday(), offloaded_on: dayAfter(dnToday()), picked: [] };
   renderDeliveryNote();
 }
 
@@ -129,6 +142,17 @@ function palletChoices(d) {
   return [...own, ...live];
 }
 
+// The full juice bins and crates this note can hold, the same way: its own,
+// then every full one on no other note (one waiting for a weight never shows).
+function binChoices(d) {
+  const taken = new Set(Store.notes().filter((n) => n.uuid !== d.uuid).flatMap((n) => (n.bins || []).map((b) => b.uuid)));
+  const live = binsNewestFirst().filter((b) => binFull(b) && !taken.has(b.uuid) && !b.error);
+  const own = (d.note ? d.note.bins || [] : []).filter((b) => !live.some((l) => l.uuid === b.uuid));
+  return [...own, ...live];
+}
+
+const tickBox = (on) => `<i class="fa-${on ? "solid fa-square-check text-blue-700" : "regular fa-square text-slate-400"} text-2xl pt-1"></i>`;
+
 function noteForm() {
   const d = dn.draft;
   const field = "w-full border border-slate-300 rounded-lg px-2 py-2.5";
@@ -136,11 +160,19 @@ function noteForm() {
   const input = (f, extra = "") => `<input data-field="${f}" value="${esc(d[f])}" ${extra} class="${field}">`;
   const select = (f, rows, picked, blank, text) => `<select data-field="${f}" class="${field}"><option value="">${blank}</option>`
     + rows.map((r) => `<option value="${esc(r.id)}"${r.id === picked ? " selected" : ""}>${esc(text(r))}</option>`).join("") + `</select>`;
-  const choices = palletChoices(d);
+  // A juice note's full bins, or the pallets in their market groups; once
+  // one is ticked the other groups can't be (a delivery is all USA, all EU
+  // or all local).
+  const choices = d.juice ? [] : palletChoices(d);
   const picked = choices.filter((p) => d.picked.includes(p.uuid));
-  // The pallets in their market groups; once one is ticked the other groups
-  // can't be (a delivery is all USA, all EU or all local).
-  const locked = picked.length ? marketGroup(picked[0].market_name) : null;
+  const bins = d.juice ? binChoices(d) : [];
+  const pickedBins = bins.filter((b) => d.picked.includes(b.uuid));
+  const locked = d.juice ? "juice" : picked.length ? marketGroup(picked[0].market_name) : null;
+  const binRows = bins.length ? groupHead("juice", containerCounts(bins))
+    + bins.map((b) => `
+    <button type="button" data-pick="${esc(b.uuid)}" class="${groupRow("juice", d.picked.includes(b.uuid), "flex gap-3")}">
+      ${tickBox(d.picked.includes(b.uuid))}<div class="flex-1 min-w-0">${binSummary(b)}</div>
+    </button>`).join("") : "";
   const pallets = MARKET_GROUPS.map(([key]) => {
     const group = choices.filter((p) => marketGroup(p.market_name) === key);
     if (!group.length) return "";
@@ -151,7 +183,7 @@ function noteForm() {
       const freed = freedBy(p.uuid);
       return `
     <button type="button" data-pick="${esc(p.uuid)}" ${off ? "disabled" : ""} class="${groupRow(key, on, "flex gap-3", off ? "opacity-40" : "")}">
-      <i class="fa-${on ? "solid fa-square-check text-blue-700" : "regular fa-square text-slate-400"} text-2xl pt-1"></i>
+      ${tickBox(on)}
       <div class="flex-1 min-w-0">${palletSummary(p)}${freed && freed.uuid !== d.uuid ? freedTag(freed) : ""}</div>
     </button>`;
     }).join("");
@@ -161,25 +193,25 @@ function noteForm() {
       <button type="button" data-back class="px-3 py-2 rounded-lg border border-slate-300 bg-white"><i class="fa-solid fa-arrow-left"></i></button>
       <div class="flex-1 min-w-0">
         <div class="font-semibold">${d.note ? `Delivery note ${esc(noteLabel(d.note))}` : "New delivery note"}</div>
-        ${picked.length ? `<div class="text-sm font-semibold text-blue-800">${esc(noteMarkets({ pallets: picked }))}</div>` : ""}
+        ${locked ? `<div class="text-sm font-semibold text-blue-800">${esc(d.juice ? "Juice" : noteMarkets({ pallets: picked }))}</div>` : ""}
       </div>
     </div>
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
       <div class="flex gap-2">
-        ${label(`Note no (${notePrefix(picked)}-)`, input("no", `inputmode="numeric" maxlength="6" placeholder="1335"`), "w-28 shrink-0")}
+        ${label(`Note no (${d.juice ? "J" : notePrefix(picked)}-)`, input("no", `inputmode="numeric" maxlength="6" placeholder="${d.juice ? "0001" : "1335"}"`), "w-28 shrink-0")}
         ${label("Transporter", select("transporter", transporterChoices(d), d.transporter_id, "Transporter...", (r) => r.name), "flex-1 min-w-0")}
       </div>
       ${label("Receiver", select("receiver", receiverChoices(d), d.receiver_id, "Receiver...", (r) => (r.text || receiverText(r)).split("\n").join(" · ")))}
-      ${locked && locked !== "local" ? label(`Target receiver (${groupTitle(locked)})`,
+      ${isExport(locked) ? label(`Target receiver (${groupTitle(locked)})`,
           select("target_receiver", targetChoices(d, locked), d.target_receiver_id, "Target receiver...", (t) => (t.text || targetText(t)).split("\n").join(" · "))) : ""}
-      <div class="flex gap-2">
+      ${d.juice ? "" : `<div class="flex gap-2">
         <div class="flex-1 min-w-0"><span class="text-xs font-semibold text-slate-600">Seal no</span>
           <div class="flex gap-2">${input("seal_no", `placeholder="Scan or type" aria-label="Seal no"`)}
           <button type="button" data-scanseal title="Scan the seal's barcode" class="px-3 rounded-lg border border-slate-300"><i class="fa-solid fa-barcode text-xl"></i></button></div></div>
         ${label("Cooled to (°C)", input("cooled_to", `inputmode="decimal" maxlength="5"`), "w-28 shrink-0")}
       </div>
       <div id="sealReader" class="hidden w-full rounded-lg overflow-hidden bg-black min-h-[200px]"></div>
-      <div id="sealMsg" class="text-sm text-red-600 empty:hidden"></div>
+      <div id="sealMsg" class="text-sm text-red-600 empty:hidden"></div>`}
       <div class="flex gap-2">
         ${label("Load date", input("loaded_on", `type="date"`), "flex-1 min-w-0")}
         ${label("Offload date", input("offloaded_on", `type="date"`), "flex-1 min-w-0")}
@@ -187,16 +219,17 @@ function noteForm() {
     </div>
     <div class="bg-white rounded-2xl shadow px-4 pb-1">
       <div class="${LIST_HEAD}">
-        <div class="text-lg font-bold">Pallets in this delivery</div>
-        <div id="noteTotals" class="text-base">${noteTotals(picked)}</div>
-        <div class="text-xs text-white/80">Tick the pallets from Pallet Stack that go in this delivery: all USA, all EU or all local.</div>
+        <div class="text-lg font-bold">${d.juice ? "Bins and crates" : "Pallets"} in this delivery</div>
+        <div id="noteTotals" class="text-base">${d.juice ? binsTotal(pickedBins) : noteTotals(picked)}</div>
+        <div class="text-xs text-white/80">${d.juice ? "Tick the full bins and crates that go in this delivery. One still waiting for its full weight is not listed."
+          : "Tick the pallets from Pallet Stack that go in this delivery: all USA, all EU or all local."}</div>
       </div>
-      ${pallets || `<div class="text-center text-slate-400 text-sm py-6 border-t">No pallets left to send</div>`}
+      ${(d.juice ? binRows : pallets) || `<div class="text-center text-slate-400 text-sm py-6 border-t">No ${d.juice ? "full bins or crates" : "pallets"} left to send</div>`}
     </div>
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
       <div id="noteMsg" class="text-sm text-red-600 empty:hidden">${d.note && d.note.error ? `Not saved: ${esc(d.note.error)}.` : ""}</div>
       <button type="button" data-savenote class="w-full boord-btn-primary rounded-xl py-4 text-lg font-bold">Save delivery note</button>
-      ${d.note ? `${noteGroup(d.note) === "local" /* local: the Bekfontein delivery note; export: the market's spreadsheet instead */
+      ${d.note ? `${!isExport(noteGroup(d.note)) /* local and juice: the Bekfontein delivery note; export: the market's spreadsheet instead */
                     ? `<button type="button" data-pdf class="w-full border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-share-from-square"></i> Print or share</button>`
                     : exportButtons(d.note)}
                   <button type="button" data-removenote class="w-full border border-red-300 text-red-700 rounded-xl py-3 font-semibold">Delete delivery note</button>` : ""}
@@ -249,18 +282,19 @@ async function saveNote() {
   const receiver = receiverChoices(d).find((r) => r.id === d.receiver_id);
   const transporter = transporterChoices(d).find((t) => t.id === d.transporter_id);
   const pallets = palletChoices(d).filter((p) => d.picked.includes(p.uuid));
+  const bins = binChoices(d).filter((b) => d.picked.includes(b.uuid));
   if (!(no >= 1)) return fail("Type the note number.");
-  const twin = Store.notes().find((n) => n.note_no === no && n.uuid !== d.uuid);
-  if (twin) return fail(`Note ${no} is already used.`);
+  const twin = Store.notes().find((n) => n.note_no === no && n.uuid !== d.uuid && isJuiceNote(n) === d.juice);
+  if (twin) return fail(`Note ${noteLabel(twin)} is already used.`);
   if (!receiver) return fail("Pick the receiver.");
   if (!transporter) return fail("Pick the transporter.");
   if (!d.loaded_on) return fail("Pick the loading date.");
-  if (!pallets.length) return fail("Tick the pallets in this delivery.");
+  if (d.juice ? !bins.length : !pallets.length) return fail(`Tick the ${d.juice ? "bins and crates" : "pallets"} in this delivery.`);
   if (new Set(pallets.map((p) => marketGroup(p.market_name))).size > 1) return fail("Untick the pallets of the other market: a delivery is all USA, all EU or all local.");
   // An export note's target receiver, if picked from its market's (a pick left over
   // from pallets of another market falls away).
-  const group = marketGroup(pallets[0].market_name);
-  const target = group === "local" ? null : targetChoices(d, group).find((t) => t.id === d.target_receiver_id);
+  const group = bins.length ? "juice" : marketGroup(pallets[0].market_name);
+  const target = isExport(group) ? targetChoices(d, group).find((t) => t.id === d.target_receiver_id) : null;
   const op = Operator.current() || {};
   const base = d.note || { kind: "delivery_note", created_at: new Date(Store.now()).toISOString(),
                            made_by: op.id || "", made_by_name: op.name || "" };
@@ -268,8 +302,8 @@ async function saveNote() {
                         receiver_id: receiver.id, receiver: receiver.text || receiverText(receiver),
                         transporter_id: transporter.id, transporter: transporter.name,
                         target_receiver_id: target ? target.id : null, target_receiver: target ? target.text || targetText(target) : "",
-                        seal_no: d.seal_no.trim(), cooled_to: d.cooled_to.trim(),
-                        loaded_on: d.loaded_on, offloaded_on: d.offloaded_on, pallets,
+                        seal_no: d.juice ? "" : d.seal_no.trim(), cooled_to: d.juice ? "" : d.cooled_to.trim(),
+                        loaded_on: d.loaded_on, offloaded_on: d.offloaded_on, pallets, bins,
                         changed_by: op.id || "", changed_by_name: op.name || "", removed: false, rev: Date.now() });
   // Back to the overview, where the note now shows; tap it there to print or share it.
   dn.view = "list";
@@ -277,7 +311,7 @@ async function saveNote() {
   window.scrollTo(0, 0);
 }
 
-// Wants the settings PIN (askPin, app.js); its pallets are then free for another note.
+// Wants the settings PIN (askPin, app.js); its pallets or bins are then free for another note.
 function removeNote() {
   const note = dn.draft.note;
   if (!confirm(`Delete delivery note ${noteLabel(note)}?`)) return;
@@ -291,16 +325,19 @@ function removeNote() {
 
 // A note's group is its pallets' (one group to a note; an older mixed note
 // goes by its first pallet), and its market the pallets' market names.
-const noteGroup = (n) => (n.pallets.length ? marketGroup(n.pallets[0].market_name) : "local");
+const noteGroup = (n) => ((n.bins || []).length ? "juice" : n.pallets.length ? marketGroup(n.pallets[0].market_name) : "local");
 const noteMarkets = (n) => [...new Set(n.pallets.map((p) => p.market_name).filter(Boolean))].join(", ") || groupTitle(noteGroup(n));
 
 // The note number's prefix: LW for a delivery of export (USA or EU)
-// pallets, B for local. One series of numbers, as export_forms.note_label.
+// pallets, B for local; one series of numbers. A juice note has its own
+// series, J-0001 on. As export_forms.note_label.
 function notePrefix(pallets) {
   return (pallets || []).some((p) => marketGroup(p.market_name) !== "local") ? "LW" : "B";
 }
 
-function noteLabel(n) { return `${notePrefix(n.pallets)}-${n.note_no}`; }
+function noteLabel(n) {
+  return isJuiceNote(n) ? `J-${String(n.note_no).padStart(4, "0")}` : `${notePrefix(n.pallets)}-${n.note_no}`;
+}
 
 // A note of export pallets has their market's papers (USA: phyto,
 // consignment and PPECB sheet; EU: the same but no phyto), drawn as the
@@ -339,7 +376,12 @@ function onDeliveryClick(ev) {
   const d = dn.draft;
   if (t.dataset.note) openNote(Store.notes().find((n) => n.uuid === t.dataset.note));
   else if ("addnote" in t.dataset) openNote(null);
-  else if ("back" in t.dataset) { dn.view = "list"; renderDeliveryNote(); }
+  else if ("back" in t.dataset) {
+    dn.view = "list";
+    // A new juice note goes back to the Juice screen it came from.
+    if (d.juice && !d.note) location.hash = "#juice";
+    else renderDeliveryNote();
+  }
   else if (t.dataset.pick) {
     const u = t.dataset.pick;
     if (t.disabled) return; // another market's pallet

@@ -120,7 +120,8 @@ function seasonView() {
 // local. Pallet Stack lists pallets by group, and a delivery note holds one
 // group (deliverynote.js; export_forms.market_group checks it on the server).
 const EXPORT_MARKETS = [["usa", "USA", /\busa\b/i], ["eu", "EU", /\beu\b/i]];
-const MARKET_GROUPS = [["usa", "USA"], ["eu", "EU"], ["local", "Local"]];
+// Juice is a group of its own: juice bins (juice.js), never pallets.
+const MARKET_GROUPS = [["usa", "USA"], ["eu", "EU"], ["local", "Local"], ["juice", "Juice"]];
 function marketGroup(name) {
   const hit = EXPORT_MARKETS.find(([, , re]) => re.test(name || ""));
   return hit ? hit[0] : "local";
@@ -131,11 +132,11 @@ const groupTitle = (key) => MARKET_GROUPS.find(([k]) => k === key)[1];
 // the group's colour, its name, a note on the right (its count; why it can't
 // be picked), greyed when dim.
 const GROUP_BAND = { usa: "bg-blue-100 border-blue-600 text-blue-900", eu: "bg-violet-100 border-violet-600 text-violet-900",
-                     local: "bg-emerald-100 border-emerald-600 text-emerald-900" };
+                     local: "bg-emerald-100 border-emerald-600 text-emerald-900", juice: "bg-orange-100 border-orange-500 text-orange-900" };
 // A row under it, across the card in a lighter shade of the same colour, so
 // each pallet or note shows its market at a glance; on (ticked) a shade darker.
 const GROUP_ROW = { usa: ["bg-blue-50", "bg-blue-200"], eu: ["bg-violet-50", "bg-violet-200"],
-                    local: ["bg-emerald-50", "bg-emerald-200"] };
+                    local: ["bg-emerald-50", "bg-emerald-200"], juice: ["bg-orange-50", "bg-orange-200"] };
 const groupRow = (key, on, display = "block", extra = "") =>
   `${display} -mx-4 px-4 w-[calc(100%+2rem)] text-left border-t border-white py-2 ${GROUP_ROW[key][on ? 1 : 0]} active:brightness-95 ${extra}`;
 const groupHead = (key, right, dim) => `

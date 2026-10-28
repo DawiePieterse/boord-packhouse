@@ -14,6 +14,9 @@ const esc = (v) => Boord.escapeHtml(v);
 
 const PALLET_BOXES = `<svg viewBox="0 0 64 64" class="w-[1.15em] h-[1em] inline-block" fill="currentColor" aria-hidden="true"><rect x="10" y="8" width="20" height="14" rx="1.5"/><rect x="34" y="8" width="20" height="14" rx="1.5"/><rect x="4" y="25" width="17" height="14" rx="1.5"/><rect x="23.5" y="25" width="17" height="14" rx="1.5"/><rect x="43" y="25" width="17" height="14" rx="1.5"/><rect x="2" y="42" width="60" height="6" rx="1"/><rect x="6" y="50" width="10" height="7" rx="1"/><rect x="27" y="50" width="10" height="7" rx="1"/><rect x="48" y="50" width="10" height="7" rx="1"/></svg>`;
 
+// A litchi: a bumpy round fruit on a stem with a leaf.
+const LITCHI = `<svg viewBox="0 0 64 64" class="w-[1em] h-[1em] inline-block" fill="currentColor" aria-hidden="true"><path d="M32 18 C33 12 35 8 38 5" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M37 7 C44 2 54 3 58 8 C51 13 42 13 37 7 Z"/><circle cx="32" cy="39" r="22"/><g fill="#fff" fill-opacity=".35"><circle cx="22" cy="30" r="3"/><circle cx="32" cy="26" r="3"/><circle cx="42" cy="30" r="3"/><circle cx="17" cy="40" r="3"/><circle cx="27" cy="37" r="3"/><circle cx="37" cy="37" r="3"/><circle cx="47" cy="40" r="3"/><circle cx="22" cy="49" r="3"/><circle cx="32" cy="47" r="3"/><circle cx="42" cy="49" r="3"/><circle cx="32" cy="56" r="2.5"/></g></svg>`;
+
 // The plan's home-screen order. parked: built, but kept off the home screen
 // and the settings menu until the farm takes it up again (its code and
 // #<id> address still work); remove the flag to bring it back.
@@ -22,6 +25,7 @@ const MODULES = [
   { id: "acid",     name: "Acid bath",           icon: "fa-flask",                    blurb: "Batches, dip and drying timers, chemical changes.", built: true, parked: true },
   { id: "palletstack", name: "Pallet Stack",   icon: "",                  iconHtml: PALLET_BOXES, blurb: "Pallets and cartons grouped into a pallet stack.", built: true },
   { id: "deliverynote", name: "Delivery Note",   icon: "fa-file-lines",               blurb: "Delivery note for a load leaving the farm.", built: true },
+  { id: "juice",    name: "Juice",               icon: "",                  iconHtml: LITCHI, blurb: "Juice bins weighed empty and full, for the delivery note.", built: true },
 ];
 
 function renderHome() {
@@ -49,7 +53,7 @@ let idleTimer = null;
 // Stack or Delivery Note without a badge (PIN_OPENS; the operator is then
 // just "PIN"), and deleting a delivery note. askPin shows the keypad, and
 // `then` runs once the PIN is right; Cancel or leaving the screen drops it.
-const PIN_OPENS = ["palletstack", "deliverynote"];
+const PIN_OPENS = ["palletstack", "deliverynote", "juice"];
 let pinAsk = null; // { title, then }
 function askPin(title, then) {
   pinAsk = { title, then };
@@ -195,7 +199,7 @@ function renderSettingsNav() {
 }
 
 // Roles that open with a badge scan.
-const BADGED = ["sulfur", "acid", "palletstack", "deliverynote"];
+const BADGED = ["sulfur", "acid", "palletstack", "deliverynote", "juice"];
 const onBadgedScreen = () => BADGED.some((id) => location.hash === `#${id}`);
 
 // --------------------------------------------------------------------------
@@ -216,7 +220,7 @@ function show() {
   const view = inSettings ? (unlocked ? "settings" : "pin")
     : badged ? (pinAsk ? "pin" : Operator.current() ? m.id : "scan")
     : m ? "module" : "home";
-  for (const id of ["home", "module", "scan", "sulfur", "acid", "palletstack", "deliverynote", "pin", "settings"]) $(id).classList.toggle("hidden", id !== view);
+  for (const id of ["home", "module", "scan", "sulfur", "acid", "palletstack", "deliverynote", "juice", "pin", "settings"]) $(id).classList.toggle("hidden", id !== view);
   // The settings menu replaces the main one only once the PIN is in; the
   // PIN pad keeps the main menu.
   $("mainNav").classList.toggle("hidden", view === "settings");
@@ -242,6 +246,7 @@ function show() {
   if (view === "acid") renderAcid(true);
   if (view === "palletstack") renderConsignment();
   if (view === "deliverynote") renderDeliveryNote();
+  if (view === "juice") renderJuice();
   if (view === "settings") {
     touchSettings();
     document.querySelectorAll("[data-settings-page]").forEach((el) =>
@@ -250,7 +255,7 @@ function show() {
       a.classList.toggle("tab-active", a.dataset.settingsNav === page.id));
     if (page.load) page.load();
   }
-  // Pallets and Delivery grey out on their own screen; Settings lights up.
+  // Pallets, Delivery and Juice grey out on their own screen; Settings lights up.
   document.querySelectorAll("[data-nav]").forEach((a) => {
     const here = inSettings ? a.dataset.nav === "settings" : !!m && a.dataset.nav === m.id;
     a.classList.toggle("tab-active", here && a.dataset.nav === "settings");
@@ -287,10 +292,12 @@ Boord.boot(() => {
   renderPinPad();
   renderSettingsNav();
   $("navPalletIcon").innerHTML = PALLET_BOXES;
+  $("navJuiceIcon").innerHTML = LITCHI;
   initSulfur();
   initAcid();
   initConsignment();
   initDeliveryNote();
+  initJuice();
   // Never inherit a sign-in: a tablet reloaded (or an installed app reopened)
   // may still hold the session cookie, and the next person must type the PIN.
   Boord.api("/api/admin/logout", { method: "POST" }).catch(() => {});
