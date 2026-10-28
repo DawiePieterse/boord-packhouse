@@ -207,8 +207,9 @@ if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
 </main>
 
 <!-- Main menu. Swapped for the settings menu while Settings is open. -->
-<nav id="mainNav" class="fixed bottom-0 inset-x-0 bg-white border-t grid grid-cols-2 z-30 safe-bottom">
-  <a href="#" data-nav="home" class="py-2 text-center text-sm"><i class="fa-solid fa-house text-2xl block"></i>Home</a>
+<nav id="mainNav" class="fixed bottom-0 inset-x-0 bg-white border-t grid grid-cols-3 z-30 safe-bottom">
+  <a href="#palletstack" data-nav="palletstack" class="py-2 text-center text-sm"><span id="navPalletIcon" class="text-2xl block"></span>Pallets</a>
+  <a href="#deliverynote" data-nav="deliverynote" class="py-2 text-center text-sm"><i class="fa-solid fa-file-lines text-2xl block"></i>Delivery</a>
   <a href="#settings" data-nav="settings" class="py-2 text-center text-sm"><i class="fa-solid fa-gear text-2xl block"></i>Settings</a>
 </nav>
 

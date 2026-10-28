@@ -1,6 +1,6 @@
 // Boord Packhouse - the home screen of big icons, one per role. Any tablet
-// can open any role; tapping one opens it full screen, and Home in the
-// bottom menu always comes back. Settings, also in the bottom menu, asks for
+// can open any role; tapping one opens it full screen, and Pallets and
+// Delivery in the bottom menu switch between those two. Settings, also in the bottom menu, asks for
 // the 4-digit PIN and has a bottom menu of its own. The screen is in the URL
 // hash (#sulfur, #settings/backup), so the browser's own back button works
 // too.
@@ -218,7 +218,7 @@ function show() {
     : m ? "module" : "home";
   for (const id of ["home", "module", "scan", "sulfur", "acid", "palletstack", "deliverynote", "pin", "settings"]) $(id).classList.toggle("hidden", id !== view);
   // The settings menu replaces the main one only once the PIN is in; the
-  // PIN pad keeps the main menu so Home is one tap away.
+  // PIN pad keeps the main menu.
   $("mainNav").classList.toggle("hidden", view === "settings");
   $("settingsNav").classList.toggle("hidden", view !== "settings");
 
@@ -250,8 +250,13 @@ function show() {
       a.classList.toggle("tab-active", a.dataset.settingsNav === page.id));
     if (page.load) page.load();
   }
-  document.querySelectorAll("[data-nav]").forEach((a) =>
-    a.classList.toggle("tab-active", a.dataset.nav === (inSettings ? "settings" : "home")));
+  // Pallets and Delivery grey out on their own screen; Settings lights up.
+  document.querySelectorAll("[data-nav]").forEach((a) => {
+    const here = inSettings ? a.dataset.nav === "settings" : !!m && a.dataset.nav === m.id;
+    a.classList.toggle("tab-active", here && a.dataset.nav === "settings");
+    a.classList.toggle("opacity-40", here && a.dataset.nav !== "settings");
+    a.classList.toggle("pointer-events-none", here && a.dataset.nav !== "settings");
+  });
   window.scrollTo(0, 0);
 }
 
@@ -281,6 +286,7 @@ Boord.boot(() => {
   renderHome();
   renderPinPad();
   renderSettingsNav();
+  $("navPalletIcon").innerHTML = PALLET_BOXES;
   initSulfur();
   initAcid();
   initConsignment();
