@@ -3,7 +3,10 @@
 // with the scale's two stickers. Full ones then go on a delivery note to the
 // juice buyer (deliverynote.js), full - empty = net. Bins and crates are the
 // same record (container "bin" or "crate"), numbered apart; "bin" in the code
-// means either.
+// means either. A crate record is a batch of crates, counted, not weighed:
+// count crates of full_kg each (the fruit in one), no empty weight, so net is
+// count x full_kg. One saved before batches (v0.53-v0.56) has an empty weight
+// and stays full - empty.
 //
 // Made on the phone with a uuid and queued in Store's outbox (kind
 // juice_bin), editable like a pallet (consignment.js): saving again re-queues
@@ -15,14 +18,15 @@
 
 let jc = { view: "list", draft: null };
 
-const binNet = (b) => (b.empty_kg != null && b.full_kg != null ? b.full_kg - b.empty_kg : null);
+const crateCount = (b) => b.count || 1;
+const isBatch = (b) => containerOf(b) === "crate" && b.empty_kg == null;
+const binNet = (b) => (isBatch(b) ? (b.full_kg != null ? crateCount(b) * b.full_kg : null)
+  : b.empty_kg != null && b.full_kg != null ? b.full_kg - crateCount(b) * b.empty_kg : null);
 const binFull = (b) => binNet(b) != null;
 const binsNewestFirst = () => Store.bins().sort((a, b) => (a.weighed_at < b.weighed_at ? 1 : -1));
 const containerOf = (b) => b.container || "bin"; // a copy made before crates is a bin
 const CONTAINER_NAME = { bin: "Bin", crate: "Crate" };
 const binName = (b) => `${CONTAINER_NAME[containerOf(b)]} ${b.bin_no}`;
-// A new crate starts at this empty weight; a bin is weighed.
-const CRATE_EMPTY_KG = "2";
 const seasonBins = (season, container) => Store.bins().filter((b) => seasonOf(b.weighed_at) === season && containerOf(b) === container);
 // The number runs on from the highest this season, as the weigh sheet does;
 // bins and crates each count on their own.
@@ -32,8 +36,8 @@ function nextBinNo(container) {
 }
 // The live delivery note a bin is on, if any.
 const binNote = (uuid) => Store.notes().find((n) => (n.bins || []).some((b) => b.uuid === uuid));
-// 2 bins · 1 crate: the containers there are (bins when none).
-const containerCounts = (bins) => ["bin", "crate"].map((c) => [c, bins.filter((b) => containerOf(b) === c).length])
+// 2 bins · 12 crates: the containers there are, every crate in a batch (bins when none).
+const containerCounts = (bins) => ["bin", "crate"].map((c) => [c, sum(bins.filter((b) => containerOf(b) === c), crateCount)])
   .filter(([c, n]) => n || (c === "bin" && !bins.length)).map(([c, n]) => `<b>${n}</b> ${c}${n === 1 ? "" : "s"}`).join(" · ");
 const binsTotal = (bins) => `${containerCounts(bins)} · <b>${kgText(sum(bins.filter(binFull), binNet))}</b> net`;
 
@@ -47,10 +51,11 @@ function renderJuice() {
 // empty weight while it waits to be weighed full. The delivery note shows it too.
 const binSummary = (b) => `
       <div class="flex justify-between gap-3 items-baseline">
-        <div class="font-bold text-lg">${esc(binName(b))}</div>
+        <div class="font-bold text-lg">${esc(binName(b))}${containerOf(b) === "crate" ? ` <span class="font-normal text-base">· ${crateCount(b)} crate${crateCount(b) === 1 ? "" : "s"}</span>` : ""}</div>
         <div class="text-sm shrink-0">${binFull(b) ? `<b>${kgText(binNet(b))}</b>` : ""}</div>
       </div>
-      <div class="text-sm">${binFull(b) ? `${kgText(b.full_kg)} full − ${kgText(b.empty_kg)} empty`
+      <div class="text-sm">${isBatch(b) ? `${crateCount(b)} × ${kgText(b.full_kg)}`
+        : binFull(b) ? `${kgText(b.full_kg)} full − ${kgText(b.empty_kg)} empty`
         : b.empty_kg != null ? `${kgText(b.empty_kg)} empty · <span class="font-semibold text-amber-700">waiting for the full weight</span>`
         : `${kgText(b.full_kg)} full · <span class="font-semibold text-amber-700">waiting for the empty weight</span>`}</div>`;
 
@@ -106,17 +111,24 @@ function juiceNotesView() {
 
 function openBin(bin, container = "bin") {
   jc.view = "bin";
+  const kg = (v) => (v == null ? "" : String(+v.toFixed(2)));
   jc.draft = bin
-    ? { uuid: bin.uuid, bin, container: containerOf(bin), no: String(bin.bin_no),
-        empty: bin.empty_kg == null ? "" : String(bin.empty_kg), full: bin.full_kg == null ? "" : String(bin.full_kg) }
-    : { uuid: Boord.uuid(), bin: null, container, no: nextBinNo(container), empty: container === "crate" ? CRATE_EMPTY_KG : "", full: "" };
+    ? { uuid: bin.uuid, bin, container: containerOf(bin), no: String(bin.bin_no), count: String(crateCount(bin)),
+        empty: kg(bin.empty_kg), full: kg(bin.full_kg) }
+    : { uuid: Boord.uuid(), bin: null, container, no: nextBinNo(container), count: "1", empty: "", full: "" };
+  // A crate from before batches opens as a batch of one, its net the weight per crate.
+  if (bin && jc.draft.container === "crate" && !isBatch(bin)) Object.assign(jc.draft, { empty: "", full: kg(binNet(bin)) });
   renderJuice();
 }
 
 // A weight as typed: 37 or 37,5; blank is not weighed yet.
 const kgOf = (v) => (String(v).trim() === "" ? null : Number(String(v).replace(",", ".")));
 
+// A batch's total: number of crates x weight per crate.
+const draftTotal = (d) => (kgOf(d.full) > 0 && Number(d.count) >= 1 ? Number(d.count) * kgOf(d.full) : null);
+
 function draftNetText(d) {
+  if (d.container === "crate") return draftTotal(d) != null ? `Net <b>${kgText(draftTotal(d))}</b>` : "";
   const empty = kgOf(d.empty);
   const full = kgOf(d.full);
   return empty != null && full != null && full > empty ? `Net <b>${kgText(full - empty)}</b>` : "";
@@ -124,27 +136,33 @@ function draftNetText(d) {
 
 function binForm() {
   const d = jc.draft;
-  const name = CONTAINER_NAME[d.container];
   const crate = d.container === "crate";
+  const word = crate ? "batch" : "bin"; // the form calls a crate record a batch
   const field = "w-full border border-slate-300 rounded-lg px-2 py-3 text-xl";
   const label = (text, html, cls) => `<label class="${cls}"><span class="text-xs font-semibold text-slate-600">${text}</span>${html}</label>`;
   const input = (f, extra) => `<input data-field="${f}" value="${esc(d[f])}" ${extra} class="${field}">`;
   return `
     <div class="flex items-center gap-3">
       <button type="button" data-back class="px-3 py-2 rounded-lg border border-slate-300 bg-white"><i class="fa-solid fa-arrow-left"></i></button>
-      <div class="flex-1"><div class="font-semibold">${d.bin ? esc(binName(d.bin)) : `New ${name.toLowerCase()}`}</div>
+      <div class="flex-1"><div class="font-semibold">${d.bin ? esc(binName(d.bin)) : crate ? "New crate batch" : "New bin"}</div>
         <div id="binNet" class="text-sm">${draftNetText(d)}</div></div>
     </div>
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
-      ${label(`${name} no`, input("no", `inputmode="numeric" maxlength="5" placeholder="${crate ? "1" : "88"}"`), "block w-28")}
       <div class="flex gap-2">
-        ${label("Empty (kg)", input("empty", `inputmode="decimal" maxlength="6" placeholder="${crate ? "2" : "37"}"`), "flex-1 min-w-0")}
-        ${label("Full (kg)", input("full", `inputmode="decimal" maxlength="6" placeholder="${crate ? "20" : "503"}"`), "flex-1 min-w-0")}
+        ${label(crate ? "Batch no" : "Bin no", input("no", `inputmode="numeric" maxlength="5" placeholder="${crate ? "1" : "88"}"`), "block w-28")}
+        ${crate ? label("Number of crates in batch", input("count", `inputmode="numeric" maxlength="4" placeholder="1"`), "block w-48") : ""}
       </div>
-      <div class="text-xs text-slate-500">Weigh it empty first and save; open it again when it is full to add the full weight.</div>
+      <div class="flex gap-2">
+        ${crate ? `${label("Weight / crate (kg)", input("full", `inputmode="decimal" maxlength="6" placeholder="20"`), "flex-1 min-w-0")}
+          ${label("Total weight (kg)", `<input id="batchTotal" disabled value="${draftTotal(d) == null ? "" : +draftTotal(d).toFixed(2)}" class="${field} bg-slate-100 font-semibold">`, "flex-1 min-w-0")}`
+        : `${label("Empty (kg)", input("empty", `inputmode="decimal" maxlength="6" placeholder="37"`), "flex-1 min-w-0")}
+          ${label("Full (kg)", input("full", `inputmode="decimal" maxlength="6" placeholder="503"`), "flex-1 min-w-0")}`}
+      </div>
+      <div class="text-xs text-slate-500">${crate ? "Total weight is the number of crates in batch × weight per crate."
+        : "Weigh it empty first and save; open it again when it is full to add the full weight."}</div>
       <div id="binMsg" class="text-sm text-red-600 empty:hidden">${d.bin && d.bin.error ? `Not saved: ${esc(d.bin.error)}.` : ""}</div>
-      <button type="button" data-savebin class="w-full boord-btn-primary rounded-xl py-4 text-lg font-bold">Save ${name.toLowerCase()}</button>
-      ${d.bin ? `<button type="button" data-removebin class="w-full border border-red-300 text-red-700 rounded-xl py-3 font-semibold">Delete ${name.toLowerCase()}</button>` : ""}
+      <button type="button" data-savebin class="w-full boord-btn-primary rounded-xl py-4 text-lg font-bold">Save ${word}</button>
+      ${d.bin ? `<button type="button" data-removebin class="w-full border border-red-300 text-red-700 rounded-xl py-3 font-semibold">Delete ${word}</button>` : ""}
     </div>`;
 }
 
@@ -155,17 +173,21 @@ async function saveBin() {
   const empty = kgOf(d.empty);
   const full = kgOf(d.full);
   const name = CONTAINER_NAME[d.container];
-  if (!(no >= 1)) return fail(`Type the ${name.toLowerCase()} number.`);
+  const crate = d.container === "crate";
+  const count = crate ? Number(d.count) : 1;
+  if (!(no >= 1)) return fail(crate ? "Type the batch number." : "Type the bin number.");
+  if (!(count >= 1)) return fail("Type the number of crates in the batch.");
+  if (crate && full == null) return fail("Type the weight per crate.");
   const season = d.bin ? seasonOf(d.bin.weighed_at) : seasonOf(nowIso());
-  if (seasonBins(season, d.container).some((b) => b.bin_no === no && b.uuid !== d.uuid)) return fail(`${name} ${no} is already used this season.`);
+  if (seasonBins(season, d.container).some((b) => b.bin_no === no && b.uuid !== d.uuid)) return fail(`${crate ? "Batch" : name} ${no} is already used this season.`);
   if (empty == null && full == null) return fail("Type the empty weight, or the full weight.");
   if ([empty, full].some((kg) => kg != null && !(kg > 0 && kg < 5000))) return fail("A weight is a number of kg, like 37.");
   if (empty != null && full != null && full <= empty) return fail("The full weight is more than the empty weight.");
   const note = d.bin && binNote(d.uuid);
-  if (note && (empty == null || full == null)) return fail(`${binName(d.bin)} is on delivery note ${noteLabel(note)}: it needs both weights.`);
+  if (note && !crate && (empty == null || full == null)) return fail(`${binName(d.bin)} is on delivery note ${noteLabel(note)}: it needs both weights.`);
   const op = Operator.current() || {};
   const base = d.bin || { kind: "juice_bin", weighed_at: nowIso(), made_by: op.id || "", made_by_name: op.name || "" };
-  await Store.saveRun({ ...base, kind: "juice_bin", uuid: d.uuid, container: d.container, bin_no: no, empty_kg: empty, full_kg: full,
+  await Store.saveRun({ ...base, kind: "juice_bin", uuid: d.uuid, container: d.container, count, bin_no: no, empty_kg: empty, full_kg: full,
                         changed_by: op.id || "", changed_by_name: op.name || "", removed: false, rev: Date.now() });
   jc.view = "list";
   renderJuice();
@@ -198,10 +220,11 @@ function onJuiceClick(ev) {
 function onJuiceInput(ev) {
   const f = ev.target.dataset.field;
   if (!f) return;
-  const v = f === "no" ? ev.target.value.replace(/\D/g, "") : ev.target.value.replace(/[^\d.,]/g, "");
+  const v = f === "no" || f === "count" ? ev.target.value.replace(/\D/g, "") : ev.target.value.replace(/[^\d.,]/g, "");
   ev.target.value = v;
   jc.draft[f] = v;
   $("binNet").innerHTML = draftNetText(jc.draft);
+  if ($("batchTotal")) $("batchTotal").value = draftTotal(jc.draft) == null ? "" : +draftTotal(jc.draft).toFixed(2);
 }
 
 function initJuice() {
