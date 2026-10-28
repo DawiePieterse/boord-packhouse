@@ -64,7 +64,7 @@ function notesView() {
     </div>
     <div class="bg-white rounded-2xl shadow px-4 pb-1">
       <div class="${LIST_HEAD}">
-        <div class="text-lg font-bold">Delivery notes today</div>
+        <div class="text-lg font-bold">Delivery notes added today</div>
         <div class="text-xs text-white/80">Tap a note to edit, print or share it.</div>
       </div>
       ${rows || `<div class="text-center text-slate-400 text-sm py-6 border-t">No delivery notes yet today</div>`}
