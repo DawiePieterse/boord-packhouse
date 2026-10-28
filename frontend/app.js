@@ -314,6 +314,15 @@ Boord.boot(() => {
   for (const type of ["pointerdown", "keydown", "scroll"]) {
     document.addEventListener(type, () => { if (onBadgedScreen()) Operator.touch(); }, { capture: true, passive: true });
   }
+  // iOS, in the installed app: after the keyboard closes, the fixed bottom
+  // menu can stay up where the keyboard's top edge was, halfway up the screen.
+  // Scrolling to where the page already is, once the keyboard is gone, makes
+  // iOS place it at the bottom again. Skipped while focus moves to another field.
+  document.addEventListener("focusout", () => setTimeout(() => {
+    if (!document.activeElement || !document.activeElement.matches("input, textarea, select")) {
+      window.scrollTo(window.scrollX, window.scrollY);
+    }
+  }, 400));
   show();
   Store.start();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("service-worker.js").catch(() => {});
