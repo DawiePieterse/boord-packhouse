@@ -136,7 +136,9 @@ const GROUP_BAND = { usa: "bg-blue-100 border-blue-600 text-blue-900", eu: "bg-v
 // A row under it, across the card in a lighter shade of the same colour, so
 // each pallet or note shows its market at a glance; on (ticked) a shade darker.
 const GROUP_ROW = { usa: ["bg-blue-50", "bg-blue-200"], eu: ["bg-violet-50", "bg-violet-200"],
-                    local: ["bg-emerald-50", "bg-emerald-200"], juice: ["bg-orange-50", "bg-orange-200"] };
+                    local: ["bg-emerald-50", "bg-emerald-200"], juice: ["bg-orange-50", "bg-orange-200"],
+                    // a juice note's row by what it holds: bins (juice, above), crates, or both
+                    crates: ["bg-yellow-100", "bg-yellow-200"], mixed: ["bg-rose-100", "bg-rose-200"] };
 const groupRow = (key, on, display = "block", extra = "") =>
   `${display} -mx-4 px-4 w-[calc(100%+2rem)] text-left border-t border-white py-2 ${GROUP_ROW[key][on ? 1 : 0]} active:brightness-95 ${extra}`;
 const groupHead = (key, right, dim) => `
