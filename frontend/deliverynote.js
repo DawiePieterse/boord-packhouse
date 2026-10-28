@@ -49,7 +49,7 @@ function nextNoteNo(juice) {
   if (juice) return String(last + 1).padStart(4, "0");
   return last ? String(last + 1) : "";
 }
-const receiverText = (r) => [r.name, r.market, r.city].filter(Boolean).join("\n");
+const receiverText = (r) => [r.name, r.market, r.address_1, r.address_2, r.city].filter(Boolean).join("\n");
 const noteTotals = (pallets, bins = []) => (bins.length ? binsTotal(bins)
   : `<b>${pallets.length}</b> pallet${pallets.length === 1 ? "" : "s"} · <b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b>`);
 const isExport = (group) => group === "usa" || group === "eu";
@@ -429,9 +429,9 @@ function onDeliveryInput(ev) {
 // ---- Settings -> Delivery Note ----------------------------------------------
 
 // One compact row a transporter, receiver or target receiver: name (a
-// receiver's market and city beneath; a target receiver's USA or EU and
+// receiver's market, address and city beneath; a target receiver's USA or EU and
 // address), In use, delete, save. The packs' rows (consignment.js), one field more.
-const DN_KINDS = { transporters: ["New transporter", "Transporter"], receivers: ["New receiver", "Receiver, then its market and city"],
+const DN_KINDS = { transporters: ["New transporter", "Transporter"], receivers: ["New receiver", "Receiver, then its market, address and city"],
                    targetreceivers: ["New target receiver", "Target receiver, then its market (USA or EU) and address"] };
 function dnSettingsRow(kind, row) {
   const isNew = row.id == null;
@@ -439,6 +439,10 @@ function dnSettingsRow(kind, row) {
   const extra = kind === "receivers" ? `
       <div class="flex gap-1.5 mt-1.5">
         <input name="market" value="${esc(row.market)}" placeholder="Market" class="flex-1 min-w-0 ${box}">
+        <input name="address_1" value="${esc(row.address_1)}" placeholder="Address 1" class="flex-1 min-w-0 ${box}">
+      </div>
+      <div class="flex gap-1.5 mt-1.5">
+        <input name="address_2" value="${esc(row.address_2)}" placeholder="Address 2" class="flex-1 min-w-0 ${box}">
         <input name="city" value="${esc(row.city)}" placeholder="City" class="flex-1 min-w-0 ${box}">
       </div>` : kind === "targetreceivers" ? `
       <div class="flex gap-1.5 mt-1.5">
@@ -461,7 +465,7 @@ function dnSettingsCard(kind, rows) {
   const head = `<div class="flex gap-1.5 pt-3 text-xs text-slate-500"><span class="flex-1">${DN_KINDS[kind][1]}</span>`
     + `<span class="w-10 shrink-0 text-center">In use</span><span class="w-10 shrink-0"></span><span class="w-14 shrink-0"></span></div>`;
   return `<div class="bg-white rounded-2xl shadow px-3 pb-1 divide-y divide-slate-100">${head}`
-    + rows.map((r) => dnSettingsRow(kind, r)).join("") + dnSettingsRow(kind, { id: null, name: "", market: "", city: "", address: "" }) + `</div>`;
+    + rows.map((r) => dnSettingsRow(kind, r)).join("") + dnSettingsRow(kind, { id: null, name: "", market: "", address_1: "", address_2: "", city: "", address: "" }) + `</div>`;
 }
 
 async function loadDeliverySettings() {
@@ -505,7 +509,7 @@ function saveDeliverySetting(ev) {
   const kind = form.dataset.dnForm;
   const isNew = form.dataset.id === "new";
   const body = { name: f.get("name"), active: isNew ? true : f.get("active") === "on" };
-  if (kind === "receivers") Object.assign(body, { market: f.get("market"), city: f.get("city") });
+  if (kind === "receivers") Object.assign(body, { market: f.get("market"), address_1: f.get("address_1"), address_2: f.get("address_2"), city: f.get("city") });
   if (kind === "targetreceivers") Object.assign(body, { market: f.get("market"), address: f.get("address") });
   dnSettingsCall(`/api/settings/${kind}${isNew ? "" : `/${form.dataset.id}`}`, { method: isNew ? "POST" : "PUT", body }, isNew ? "Added" : "Saved");
 }

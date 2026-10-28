@@ -26,6 +26,8 @@ class TransporterIn(SQLModel):
 class ReceiverIn(SQLModel):
     name: str
     market: str = ""
+    address_1: str = ""
+    address_2: str = ""
     city: str = ""
     active: bool = True
 
@@ -80,13 +82,15 @@ def all_receivers(session: Session = Depends(get_packhouse_session)):
 
 @router.post("/receivers")
 def add_receiver(body: ReceiverIn, session: Session = Depends(get_packhouse_session)):
-    body.market, body.city = body.market.strip(), body.city.strip()
+    for k in ("market", "address_1", "address_2", "city"):
+        setattr(body, k, getattr(body, k).strip())
     return _save(session, Receiver, None, body)
 
 
 @router.put("/receivers/{row_id}")
 def update_receiver(row_id: int, body: ReceiverIn, session: Session = Depends(get_packhouse_session)):
-    body.market, body.city = body.market.strip(), body.city.strip()
+    for k in ("market", "address_1", "address_2", "city"):
+        setattr(body, k, getattr(body, k).strip())
     return _save(session, Receiver, row_id, body)
 
 
