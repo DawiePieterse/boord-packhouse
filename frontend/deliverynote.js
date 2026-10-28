@@ -135,10 +135,11 @@ function noteForm() {
     return groupHead(key, off ? `Not with ${groupTitle(locked)} pallets` : `${group.length} pallet${group.length === 1 ? "" : "s"}`, off)
       + group.map((p) => {
       const on = d.picked.includes(p.uuid);
+      const freed = freedBy(p.uuid);
       return `
     <button type="button" data-pick="${esc(p.uuid)}" ${off ? "disabled" : ""} class="${groupRow(key, on, "flex gap-3", off ? "opacity-40" : "")}">
       <i class="fa-${on ? "solid fa-square-check text-blue-700" : "regular fa-square text-slate-400"} text-2xl pt-1"></i>
-      <div class="flex-1 min-w-0">${palletSummary(p)}</div>
+      <div class="flex-1 min-w-0">${palletSummary(p)}${freed && freed.uuid !== d.uuid ? freedTag(freed) : ""}</div>
     </button>`;
     }).join("");
   }).join("");
@@ -263,13 +264,16 @@ async function saveNote() {
   window.scrollTo(0, 0);
 }
 
-async function removeNote() {
-  if (!confirm(`Delete delivery note ${noteLabel(dn.draft.note)}?`)) return;
-  const op = Operator.current() || {};
-  await Store.saveRun({ ...dn.draft.note, kind: "delivery_note", removed: true, changed_by: op.id || "",
-                        changed_by_name: op.name || "", rev: Date.now() });
-  dn.view = "list";
-  renderDeliveryNote();
+// Wants the settings PIN (askPin, app.js); its pallets are then free for another note.
+function removeNote() {
+  const note = dn.draft.note;
+  if (!confirm(`Delete delivery note ${noteLabel(note)}?`)) return;
+  askPin(`PIN to delete note ${noteLabel(note)}`, async () => {
+    const op = Operator.current() || {};
+    await Store.saveRun({ ...note, kind: "delivery_note", removed: true, changed_by: op.id || "",
+                          changed_by_name: op.name || "", rev: Date.now() });
+    dn.view = "list";
+  });
 }
 
 // A note's group is its pallets' (one group to a note; an older mixed note

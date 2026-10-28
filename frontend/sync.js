@@ -243,7 +243,9 @@ const Store = (() => {
     // Settings -> Delivery Note: the transporters, receivers and cooled-to a new note starts with.
     noteOptions: () => cached("ph_note_options", {}),
     // Delivery notes, edited like pallets, newest first.
-    notes: () => liveMerged(cached("ph_notes", {}).notes || [], "delivery_note").filter((n) => !n.removed)
+    notes: () => Store.allNotes().filter((n) => !n.removed),
+    // Deleted ones too (the server sends them), so Pallet Stack can show which pallets one freed.
+    allNotes: () => liveMerged(cached("ph_notes", {}).notes || [], "delivery_note")
       .sort((a, b) => (a.created_at < b.created_at ? 1 : -1)),
 
     // Make or update a record: into the outbox first, then try to send it.

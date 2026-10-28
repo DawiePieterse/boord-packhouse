@@ -74,6 +74,42 @@ function palletsView() {
         <div class="text-xs text-white/80">Tap a pallet to edit or delete it.</div>
       </div>
       ${rows || `<div class="text-center text-slate-400 text-sm py-6 border-t">No pallets yet today</div>`}
+    </div>
+    ${seasonView()}`;
+}
+
+// The deleted note a pallet was on, while it is on no live note: free to go
+// on another delivery. Highlighted here and on the delivery note's picker.
+function freedBy(uuid) {
+  const notes = Store.allNotes();
+  if (notes.some((n) => !n.removed && n.pallets.some((p) => p.uuid === uuid))) return null;
+  return notes.find((n) => n.removed && n.pallets.some((p) => p.uuid === uuid)) || null;
+}
+const freedTag = (note) => `<div class="text-sm font-semibold text-amber-800 mt-1"><i class="fa-solid fa-rotate-left"></i> Delivery note ${esc(noteLabel(note))} was deleted: free for another delivery</div>`;
+
+// Every pallet packed this season (that this phone holds: 90 days), only to
+// look at, greyed; one a deleted delivery note freed stands out.
+function seasonView() {
+  const season = seasonOf(nowIso());
+  const pallets = newestFirst().filter((p) => seasonOf(p.scanned_at) === season);
+  if (!pallets.length) return "";
+  const rows = MARKET_GROUPS.map(([key]) => {
+    const group = pallets.filter((p) => marketGroup(p.market_name) === key);
+    if (!group.length) return "";
+    return groupHead(key, `${group.length} pallet${group.length === 1 ? "" : "s"} · ${sum(group, palletCartons)} cartons · ${kgText(sum(group, palletKg))}`)
+      + group.map((p) => {
+        const freed = freedBy(p.uuid);
+        return `<div class="${groupRow(key, false, "block", freed ? "ring-4 ring-inset ring-amber-400 bg-amber-50" : "opacity-50 grayscale")}">${palletSummary(p)}${freed ? freedTag(freed) : ""}</div>`;
+      }).join("");
+  }).join("");
+  return `
+    <div class="bg-white rounded-2xl shadow px-4 pb-1">
+      <div class="${LIST_HEAD}">
+        <div class="text-lg font-bold">Pallets this season (${season})</div>
+        <div class="text-base"><b>${pallets.length}</b> pallet${pallets.length === 1 ? "" : "s"} · <b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b></div>
+        <div class="text-xs text-white/80">Highlighted: its delivery note was deleted, so it can go on another.</div>
+      </div>
+      ${rows}
     </div>`;
 }
 
