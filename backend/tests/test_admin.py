@@ -50,3 +50,11 @@ def test_changing_the_pin_signs_other_tablets_out(admin_client):
     assert admin_client.get("/api/admin/me").status_code == 200  # this tablet re-issued
     assert not admin_auth.token_valid(other)
     assert admin_client.post("/api/admin/pin", json={"current": "0000", "new": "1111"}).status_code == 400
+
+
+def test_check_takes_the_pin_without_opening_settings(client):
+    admin_auth.set_pin(ADMIN_PIN)
+    assert client.post("/api/admin/check", json={"pin": "0000"}).status_code == 401
+    r = client.post("/api/admin/check", json={"pin": ADMIN_PIN})
+    assert r.status_code == 200 and "set-cookie" not in r.headers
+    assert client.get("/api/admin/me").status_code == 401

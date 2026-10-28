@@ -79,6 +79,8 @@ if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
         <i class="fa-solid fa-qrcode"></i> Scan your badge</button>
       <button id="scanCancel" type="button" class="hidden w-full border rounded-xl py-3 font-semibold">Cancel</button>
       <div id="scanMsg" class="text-sm text-red-600 min-h-[1.25rem]"></div>
+      <button id="scanPinBtn" type="button" class="hidden w-full border rounded-xl py-3 font-semibold">
+        <i class="fa-solid fa-lock"></i> Use the PIN instead</button>
     </div>
   </section>
 
@@ -110,7 +112,7 @@ if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
   <section id="pin" class="hidden">
     <div class="bg-white rounded-2xl shadow p-6 max-w-sm mx-auto text-center">
       <i class="fa-solid fa-lock text-4xl" style="color: var(--boord-blue)"></i>
-      <div class="text-xl font-bold mt-3">Settings PIN</div>
+      <div id="pinTitle" class="text-xl font-bold mt-3">Settings PIN</div>
       <div id="pinDots" class="flex justify-center gap-4 my-5"></div>
       <div id="pinError" class="text-red-600 text-sm min-h-[1.25rem] mb-2"></div>
       <div id="pinPad" class="grid grid-cols-3 gap-3"></div>

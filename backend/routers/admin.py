@@ -30,6 +30,14 @@ def login(body: LoginIn, response: Response):
     return {"ok": True}
 
 
+@router.post("/check")
+def check(body: LoginIn):
+    """The settings PIN opening Pallet Stack or Delivery Note instead of a
+    badge: the same PIN and lockout, but no Settings cookie."""
+    admin_auth.attempt_login(body.pin)
+    return {"ok": True}
+
+
 @router.post("/logout")
 def logout(response: Response):
     response.delete_cookie(COOKIE, httponly=True, secure=True, samesite="strict")

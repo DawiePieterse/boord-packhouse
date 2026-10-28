@@ -44,6 +44,11 @@ const SETTINGS_IDLE_MS = 5 * 60 * 1000;
 let unlocked = false;
 let pinEntry = "";
 let idleTimer = null;
+// Pallet Stack and Delivery Note also open with the settings PIN instead of a
+// badge (PIN_OPENS); the operator is then just "PIN". Needs the server, which
+// checks it with the same lockout but hands out no Settings cookie.
+const PIN_OPENS = ["palletstack", "deliverynote"];
+let pinForFloor = false;
 
 function renderPinPad() {
   const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "del"];
@@ -72,6 +77,13 @@ async function pressKey(key) {
   const pin = pinEntry;
   pinEntry = "";
   try {
+    if (pinForFloor) {
+      await Boord.api("/api/admin/check", { method: "POST", body: { pin } });
+      pinForFloor = false;
+      Operator.set({ id: "", name: "PIN" });
+      show();
+      return;
+    }
     await Boord.api("/api/admin/login", { method: "POST", body: { pin } });
     unlocked = true;
     show();
@@ -193,8 +205,9 @@ function show() {
   if (!onBadgedScreen()) Operator.leave();
   else Operator.touch();
   const badged = m && BADGED.includes(m.id);
+  if (!badged || Operator.current()) pinForFloor = false;
   const view = inSettings ? (unlocked ? "settings" : "pin")
-    : badged ? (Operator.current() ? m.id : "scan")
+    : badged ? (Operator.current() ? m.id : pinForFloor ? "pin" : "scan")
     : m ? "module" : "home";
   for (const id of ["home", "module", "scan", "sulfur", "acid", "palletstack", "deliverynote", "pin", "settings"]) $(id).classList.toggle("hidden", id !== view);
   // The settings menu replaces the main one only once the PIN is in; the
@@ -210,6 +223,8 @@ function show() {
     $("moduleName").textContent = m.name;
     $("moduleBlurb").textContent = m.blurb;
   }
+  if (view === "pin") $("pinTitle").textContent = pinForFloor ? `${m.name} PIN` : "Settings PIN";
+  if (view === "scan") $("scanPinBtn").classList.toggle("hidden", !PIN_OPENS.includes(m.id));
   if (view === "pin") { pinEntry = ""; $("pinError").textContent = ""; renderPinDots(); }
   if (view !== "scan") stopCamera();
   if (view !== "palletstack") stopPalletScan();
@@ -265,6 +280,7 @@ Boord.boot(() => {
   // Never inherit a sign-in: a tablet reloaded (or an installed app reopened)
   // may still hold the session cookie, and the next person must type the PIN.
   Boord.api("/api/admin/logout", { method: "POST" }).catch(() => {});
+  $("scanPinBtn").addEventListener("click", () => { pinForFloor = true; show(); });
   $("pinChangeForm").addEventListener("submit", changePin);
   $("runBackupBtn").addEventListener("click", runBackupNow);
   $("backupsTable").addEventListener("click", downloadBackup);
