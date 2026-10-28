@@ -91,6 +91,18 @@ The home screen is a grid of large icons, sized for wet hands and gloves. Each o
 - **PPECB inspection** per pallet or consignment: inspector, date, Pass, Fail or Re-inspect, the reference number, and a photo of the inspection document.
 - A failed pallet is flagged everywhere and can't be dispatched as export.
 
+### Juice
+
+The paper today (December 2025 season), in the order it happens. Juice goes to Onderberg in Palogix bulk bins.
+
+1. **Empty bins in:** Palogix's Product Movement Note (`PDM 94559`: sender, receiver, product type, full/empty/total, transporter, driver, vehicle reg, date) and the farm's own receiving slip (date, bin slip no = the PDM number, vehicle reg, number of empty Palogix bins, received by, and "Cool 18", the farm's receiving slip number). The handwritten slip stays: a copy goes to the driver, so the app only records its number, not a printed slip.
+2. **Weighing:** each bin has a number (88, 89, …) and two scale stickers (scale D:12167), empty and full, each with kg, date and time.
+3. **Delivery note:** the Afleweringsnota (`B-1310`) lists the bins as full − empty = net kg, with the total, to Onderberg.
+4. **Onderberg weighbridge report:** per delivery note their gross and nett kg, our kg beside it, the difference, and comments (green, cracks, sunburn, rejected bins).
+5. **Onderberg payment advice:** per delivery note the payable kg, % rotten, the price (R4,000/ton in two equal parts), deductions (SALGA levy 2 %) and payment dates.
+
+Build stages: **A** bins weighed and ticked onto a J- delivery note (**built, v0.53**); **B** empty bins in; **C** Onderberg's kg and rotten % per note against ours.
+
 ### Dispatch / juice bins
 
 - **Build a load:** scan pallets and juice bins onto a truck. Export loads are sea or air freight. Captures freight mode, destination, transporter, driver, vehicle registration, waybill or dispatch note, final pallet weights, container details for sea freight, and air waybill and flight for air freight.

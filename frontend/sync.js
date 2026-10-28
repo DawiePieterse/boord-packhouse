@@ -4,7 +4,7 @@
 //   the server answers: Boord's workers (badge scan), tents, fruit sources,
 //   the suggested-time settings, the weather, the server's sulfur runs, the
 //   acid baths and their state, the consignments and the packs and markets,
-//   and the delivery notes.
+//   the juice bins and the delivery notes.
 // - Records made on this tablet - sulfur runs, and acid batches, chemical
 //   changes and checks (marked by `kind`) - go to the IndexedDB outbox
 //   (idb.js) and are sent by syncNow() every SYNC_EVERY_MS, and at once after
@@ -86,6 +86,8 @@ const Store = (() => {
     ["/api/acid/sync", (rows) => ({ batches: ofKind(rows, "acid_batch"), changes: ofKind(rows, "acid_change"),
                                     checks: ofKind(rows, "acid_check") })],
     ["/api/consignment/sync", (rows) => ({ consignments: ofKind(rows, "consignment"), pallets: ofKind(rows, "pallet") })],
+    // Before the notes: a note is refused until its bins have reached the server.
+    ["/api/juice/sync", (rows) => ({ bins: ofKind(rows, "juice_bin") })],
     ["/api/deliverynote/sync", (rows) => ({ notes: ofKind(rows, "delivery_note") })],
   ];
 
@@ -177,6 +179,7 @@ const Store = (() => {
       keep("ph_packaging", await Boord.api("/api/packaging"));
       keep("ph_markets", await Boord.api("/api/markets"));
       keep("ph_suppliers", await Boord.api("/api/suppliers"));
+      keep("ph_juice", await Boord.api("/api/juice/state"));
       keep("ph_notes", await Boord.api("/api/deliverynote/state"));
       keep("ph_note_options", await Boord.api("/api/deliverynote/options"));
       if (Date.now() - lastWorkers > WORKERS_EVERY_MS) await refreshWorkers();
@@ -240,6 +243,8 @@ const Store = (() => {
     packaging: () => cached("ph_packaging", []),
     markets: () => cached("ph_markets", []),
     suppliers: () => cached("ph_suppliers", []),
+    // Juice bins (juice.py), edited like pallets.
+    bins: () => liveMerged(cached("ph_juice", {}).bins || [], "juice_bin").filter((b) => !b.removed),
     // Settings -> Delivery Note: the transporters, receivers and cooled-to a new note starts with.
     noteOptions: () => cached("ph_note_options", {}),
     // Delivery notes, edited like pallets, newest first.

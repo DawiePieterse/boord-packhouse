@@ -7,7 +7,8 @@ Who made it is set once, on first arrival. What is on the truck is pallets
 from Pallet Stack, each on at most one live note; the note keeps its own copy
 of each (number, barcode, supplier, market, lines), taken from the server's
 pallet when the note is saved, so a pallet edited afterwards leaves a note
-that has gone out as it was. The PDF is the paper note with every pallet and
+that has gone out as it was. A juice load is the same with juice bins
+(routers/juice.py) in place of pallets: a note holds one or the other. The PDF is the paper note with every pallet and
 its lines, to print or share on WhatsApp.
 """
 import json
@@ -20,7 +21,7 @@ from sqlmodel import Session, SQLModel, func, select
 
 import export_forms
 from db import get_packhouse_session
-from models import DeliveryNote, DeliveryNoteSettings, Pallet, Receiver, TargetReceiver, Transporter
+from models import DeliveryNote, DeliveryNoteSettings, JuiceBin, Pallet, Receiver, TargetReceiver, Transporter
 from routers.sulfur import _iso, _now, _utc_naive
 from routers.sulfur_report import _latin
 
@@ -45,6 +46,7 @@ class NoteIn(SQLModel):
     loaded_on: str = ""
     offloaded_on: str = ""
     pallets: list = []      # [{uuid, ...}]: only the uuid is read, the rest is the server's copy
+    bins: list = []         # a juice load's bins instead, read the same way
     made_by: str = ""
     made_by_name: str = ""
     changed_by: str = ""
@@ -65,6 +67,11 @@ def _is_day(v: str) -> bool:
         return False
 
 
+def _juice(juice: bool):
+    """Where-clause for one series of note numbers: the juice notes (J-), or the rest (B-, LW-)."""
+    return DeliveryNote.bins != "[]" if juice else DeliveryNote.bins == "[]"
+
+
 def _note_problem(rec: NoteIn, session: Session) -> Optional[str]:
     if not rec.uuid or len(rec.uuid) > 64:
         return "bad uuid"
@@ -72,15 +79,19 @@ def _note_problem(rec: NoteIn, session: Session) -> Optional[str]:
         return None
     if rec.note_no < 1:
         return "the note number is a whole number from 1"
-    # A note taken off frees its number.
+    # A note taken off frees its number. Juice notes (J-0001) count on their own.
     twin = session.exec(select(DeliveryNote).where(DeliveryNote.note_no == rec.note_no, DeliveryNote.uuid != rec.uuid,
-                                                   DeliveryNote.removed == False)).first()  # noqa: E712
+                                                   DeliveryNote.removed == False, _juice(bool(rec.bins)))).first()  # noqa: E712
     if twin is not None:
-        return f"note {rec.note_no} is already used"
+        return f"note {export_forms.note_label(twin)} is already used"
     if not rec.receiver.strip():
         return "a note needs its receiver"
     if not _is_day(rec.loaded_on) or (rec.offloaded_on and not _is_day(rec.offloaded_on)):
         return "bad date"
+    if rec.pallets and rec.bins:
+        return "a note holds pallets or juice bins, not both"
+    if rec.bins:
+        return _bins_problem(rec, session)
     if not rec.pallets:
         return "a note needs at least one pallet"
     uuids = _uuids(rec)
@@ -102,8 +113,28 @@ def _note_problem(rec: NoteIn, session: Session) -> Optional[str]:
     return None
 
 
-def _uuids(rec: NoteIn) -> list:
-    return [c.get("uuid") if isinstance(c, dict) else None for c in rec.pallets]
+def _bins_problem(rec: NoteIn, session: Session) -> Optional[str]:
+    uuids = _uuids(rec, "bins")
+    if len(set(uuids)) != len(uuids):
+        return "a bin or crate is on it twice"
+    for uuid in uuids:
+        b = session.get(JuiceBin, uuid)
+        if b is None or b.removed:
+            return "a bin or crate on it is not on the server (yet), or was deleted"
+        if b.empty_kg is None or b.full_kg is None:
+            return f"{b.container} {b.bin_no} needs its empty and full weights"
+    # ponytail: scans every live note, as for the pallets
+    others = session.exec(select(DeliveryNote).where(DeliveryNote.uuid != rec.uuid, DeliveryNote.removed == False)).all()  # noqa: E712
+    for other in others:
+        shared = set(uuids) & {c["uuid"] for c in json.loads(other.bins or "[]")}
+        if shared:
+            b = session.get(JuiceBin, shared.pop())
+            return f"{b.container} {b.bin_no} is already on note {export_forms.note_label(other)}"
+    return None
+
+
+def _uuids(rec: NoteIn, field: str = "pallets") -> list:
+    return [c.get("uuid") if isinstance(c, dict) else None for c in getattr(rec, field)]
 
 
 # What a note keeps of each pallet.
@@ -114,9 +145,14 @@ def _copy(p: Pallet) -> dict:
     return {**{k: getattr(p, k) for k in KEPT}, "lines": json.loads(p.lines or "[]")}
 
 
+def _copy_bin(b: JuiceBin) -> dict:
+    return {"uuid": b.uuid, "container": b.container, "bin_no": b.bin_no, "empty_kg": b.empty_kg, "full_kg": b.full_kg}
+
+
 def note_out(n: DeliveryNote) -> dict:
     o = n.model_dump()
     o["pallets"] = json.loads(n.pallets or "[]")
+    o["bins"] = json.loads(n.bins or "[]")
     for key in ("created_at", "synced_at"):
         o[key] = _iso(o[key])
     return o
@@ -138,15 +174,18 @@ def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
         row.removed, row.changed_by, row.changed_by_name = rec.removed, rec.changed_by, rec.changed_by_name
         if not rec.removed:
             row.note_no, row.pallets = rec.note_no, json.dumps([_copy(session.get(Pallet, u)) for u in _uuids(rec)])
+            # Bins, then crates, each in number order, as the paper note lists them.
+            row.bins = json.dumps(sorted((_copy_bin(session.get(JuiceBin, u)) for u in _uuids(rec, "bins")),
+                                         key=lambda b: (b["container"] != "bin", b["bin_no"])))
             row.receiver_id, row.transporter_id = rec.receiver_id, rec.transporter_id
             row.receiver, row.transporter, row.seal_no, row.cooled_to = rec.receiver, rec.transporter, rec.seal_no, rec.cooled_to
             row.loaded_on, row.offloaded_on = rec.loaded_on, rec.offloaded_on
             # Only an export note has a target receiver.
-            export = export_forms.market_group(session.get(Pallet, _uuids(rec)[0]).market_name) != "local"
+            export = bool(rec.pallets) and export_forms.market_group(session.get(Pallet, _uuids(rec)[0]).market_name) != "local"
             row.target_receiver_id = rec.target_receiver_id if export else None
             row.target_receiver = rec.target_receiver.strip() if export else ""
         session.add(row)
-        if not rec.removed:  # the last note number moves on past this one
+        if not rec.removed and not rec.bins:  # the last B-/LW- number moves on past this one
             settings = session.get(DeliveryNoteSettings, 1)
             if settings is not None and (settings.last_no or 0) < rec.note_no:
                 settings.last_no = rec.note_no
@@ -172,7 +211,8 @@ def options(session: Session = Depends(get_packhouse_session)):
     """What a new note picks from (Settings -> Delivery Note): the transporters,
     receivers and target receivers in use, the cooled-to temperature it starts with, and the
     last note number (Settings', else the highest ever used: the phones only
-    hold 90 days of notes), so the next one follows on after a quiet spell too."""
+    hold 90 days of notes), so the next one follows on after a quiet spell too.
+    Juice notes have their own series from J-0001: last_juice_no is its highest live one."""
     def active(model):
         # A to Z by name, capitals or not
         return session.exec(select(model).where(model.active == True).order_by(func.lower(model.name), model.id)).all()  # noqa: E712
@@ -181,7 +221,9 @@ def options(session: Session = Depends(get_packhouse_session)):
             "target_receivers": active(TargetReceiver),
             "cooled_to": settings.cooled_to if settings else 8.0,
             "last_no": (settings.last_no if settings and settings.last_no
-                        else session.exec(select(func.max(DeliveryNote.note_no))).one())}
+                        else session.exec(select(func.max(DeliveryNote.note_no)).where(_juice(False))).one()),
+            "last_juice_no": session.exec(select(func.max(DeliveryNote.note_no))
+                                          .where(_juice(True), DeliveryNote.removed == False)).one() or 0}  # noqa: E712
 
 
 # The printed parts of the paper note.
@@ -214,6 +256,21 @@ def _cartons(p: dict) -> int:
 
 def _pallet_kg(p: dict) -> float:
     return sum(ln["cartons"] * ln["carton_kg"] for ln in p["lines"])
+
+
+def _bin_net(b: dict) -> float:
+    return b["full_kg"] - b["empty_kg"]
+
+
+def _container(b: dict) -> str:
+    """Bin 88, or Crate 3 (a copy made before crates is a bin)."""
+    return f"{b.get('container', 'bin').capitalize()} {b['bin_no']}"
+
+
+def _containers(bins: list) -> str:
+    """2 bins · 1 crate: the ones there are."""
+    counts = [(k, sum(b.get("container", "bin") == k for b in bins)) for k in ("bin", "crate")]
+    return " · ".join(f"{n} {k}{'' if n == 1 else 's'}" for k, n in counts if n)
 
 
 def _day(v: str) -> str:
@@ -317,45 +374,60 @@ def _draw(n: DeliveryNote, pages: int):
     # (with the small print and dates after the last one) starts a new page.
     col = 26  # room for TOTAAL / TOTAL
     footer = 26  # the boxed dates and the small print in both languages
+    # A juice load has bins in place of pallets: Bin no | full - empty = net,
+    # one row a bin, as the paper note is written.
+    bins = json.loads(n.bins or "[]")
+    heads = (("HOUER / NO", "VOL - LEEG = NETTO / FULL - EMPTY = NET (LITCHIS VIR SAP / FOR JUICE)") if bins
+             else ("PALLET NO", "BESKRYWING VAN INHOUD / DESCRIPTION OF CONTENTS"))
 
     def head():
         if pdf.page_no() > 1:  # a later page says whose it is, as the first page does
             title_no()
         pdf.set_xy(x0, pdf.get_y())
-        text(7, "PALLET NO", "B", border=1, w=col, h=6, align="C")
-        text(7, "BESKRYWING VAN INHOUD / DESCRIPTION OF CONTENTS", "B", border=1, w=w - col, h=6, align="C", new_x="LMARGIN", new_y="NEXT")
+        text(7, heads[0], "B", border=1, w=col, h=6, align="C")
+        text(7, heads[1], "B", border=1, w=w - col, h=6, align="C", new_x="LMARGIN", new_y="NEXT")
 
     pdf.set_y(y)
     head()
-    pallets = json.loads(n.pallets or "[]")
     bottom = pdf.h - pdf.b_margin
-    for i, p in enumerate(pallets):
-        barcode = 4.5 if p["barcode"] else 0  # a pallet saved without one has no barcode line
-        height = 2 + 5 + barcode + 4.5 * len(p["lines"]) + 1.5
-        last = i == len(pallets) - 1
-        if pdf.get_y() + height + (8 + footer if last else 0) > bottom:
-            pdf.add_page()
-            head()
-        y = pdf.get_y()
-        pdf.rect(x0, y, col, height)
-        pdf.rect(x0 + col, y, w - col, height)
-        pdf.set_xy(x0, y + 1.5)
-        text(12, p["pallet_ref"], "B", h=6, w=col, align="C")
-        right = x0 + col + 1.5
-        inner = w - col - 3
-        pdf.set_xy(right, y + 1.5)
-        value(" · ".join(v or "-" for v in (p["date_code"], p["supplier_name"], p["market_name"])), w=inner * 0.6)
-        text(9, f"{_cartons(p)} cartons · {_kg(_pallet_kg(p))} kg", h=5, w=inner * 0.4, align="R")
-        if barcode:
-            pdf.set_xy(right, y + 6.5)
-            pdf.set_text_color(90, 90, 90)
-            text(8, f"Barcode {p['barcode']}", h=4.5, w=inner)
-            pdf.set_text_color(0, 0, 0)
-        for j, ln in enumerate(p["lines"]):
-            pdf.set_xy(right + 2, y + 6.5 + barcode + j * 4.5)
-            text(9, f"{j + 1}.  {_line_text(ln)}", h=4.5, w=inner - 2)
-        pdf.set_xy(x0, y + height)
-    total = f"{len(pallets)} pallet{'' if len(pallets) == 1 else 's'} · {sum(map(_cartons, pallets))} cartons · {_kg(sum(map(_pallet_kg, pallets)))} kg"
+    if bins:
+        for i, b in enumerate(bins):
+            if pdf.get_y() + 6 + (8 + footer if i == len(bins) - 1 else 0) > bottom:
+                pdf.add_page()
+                head()
+            text(11, _container(b), "B", border=1, w=col, h=6, align="C")
+            value(f"  {_kg(b['full_kg'])} - {_kg(b['empty_kg'])} = {_kg(_bin_net(b))} kg", border=1, w=w - col, h=6,
+                  new_x="LMARGIN", new_y="NEXT")
+        total = f"{_containers(bins)} · {_kg(sum(map(_bin_net, bins)))} kg"
+    else:
+        pallets = json.loads(n.pallets or "[]")
+        for i, p in enumerate(pallets):
+            barcode = 4.5 if p["barcode"] else 0  # a pallet saved without one has no barcode line
+            height = 2 + 5 + barcode + 4.5 * len(p["lines"]) + 1.5
+            last = i == len(pallets) - 1
+            if pdf.get_y() + height + (8 + footer if last else 0) > bottom:
+                pdf.add_page()
+                head()
+            y = pdf.get_y()
+            pdf.rect(x0, y, col, height)
+            pdf.rect(x0 + col, y, w - col, height)
+            pdf.set_xy(x0, y + 1.5)
+            text(12, p["pallet_ref"], "B", h=6, w=col, align="C")
+            right = x0 + col + 1.5
+            inner = w - col - 3
+            pdf.set_xy(right, y + 1.5)
+            value(" · ".join(v or "-" for v in (p["date_code"], p["supplier_name"], p["market_name"])), w=inner * 0.6)
+            text(9, f"{_cartons(p)} cartons · {_kg(_pallet_kg(p))} kg", h=5, w=inner * 0.4, align="R")
+            if barcode:
+                pdf.set_xy(right, y + 6.5)
+                pdf.set_text_color(90, 90, 90)
+                text(8, f"Barcode {p['barcode']}", h=4.5, w=inner)
+                pdf.set_text_color(0, 0, 0)
+            for j, ln in enumerate(p["lines"]):
+                pdf.set_xy(right + 2, y + 6.5 + barcode + j * 4.5)
+                text(9, f"{j + 1}.  {_line_text(ln)}", h=4.5, w=inner - 2)
+            pdf.set_xy(x0, y + height)
+        total = f"{len(pallets)} pallet{'' if len(pallets) == 1 else 's'} · {sum(map(_cartons, pallets))} cartons · {_kg(sum(map(_pallet_kg, pallets)))} kg"
     text(7, "TOTAAL / TOTAL", "B", border=1, w=col, h=8, align="C")
     value(total, "B", border=1, w=w - col, h=8, new_x="LMARGIN", new_y="NEXT")
 
