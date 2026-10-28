@@ -87,8 +87,8 @@ function freedBy(uuid) {
 }
 const freedTag = (note) => `<div class="text-sm font-semibold text-amber-800 mt-1"><i class="fa-solid fa-rotate-left"></i> Delivery note ${esc(noteLabel(note))} was deleted: free for another delivery</div>`;
 
-// Every pallet packed this season (that this phone holds: 90 days), only to
-// look at, greyed; one a deleted delivery note freed stands out.
+// Every pallet packed this season (that this phone holds: 90 days), each
+// opening to edit like today's; one a deleted delivery note freed stands out.
 function seasonView() {
   const season = seasonOf(nowIso());
   const pallets = newestFirst().filter((p) => seasonOf(p.scanned_at) === season);
@@ -102,7 +102,7 @@ function seasonView() {
         // A freed one opens to change it, or split it: take cartons off here, add a new pallet for them.
         return freed
           ? `<button type="button" data-pallet="${esc(p.uuid)}" class="${groupRow(key, false, "block", "ring-4 ring-inset ring-amber-400 bg-amber-50")}">${palletSummary(p)}${freedTag(freed)}<div class="text-xs text-amber-800">Tap to change or split it.</div></button>`
-          : `<div class="${groupRow(key, false, "block", "opacity-50 grayscale")}">${palletSummary(p)}</div>`;
+          : `<button type="button" data-pallet="${esc(p.uuid)}" class="${groupRow(key)}">${palletSummary(p)}</button>`;
       }).join("");
   }).join("");
   return `
@@ -110,7 +110,7 @@ function seasonView() {
       <div class="${LIST_HEAD}">
         <div class="text-lg font-bold">Pallets this season (${season})</div>
         <div class="text-base"><b>${pallets.length}</b> pallet${pallets.length === 1 ? "" : "s"} · <b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b></div>
-        <div class="text-xs text-white/80">Highlighted: its delivery note was deleted, so it can go on another. Tap one to change or split it.</div>
+        <div class="text-xs text-white/80">Tap a pallet to edit or delete it. Highlighted: its delivery note was deleted, so it can go on another.</div>
       </div>
       ${rows}
     </div>`;

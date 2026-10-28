@@ -358,11 +358,12 @@ function noteLabel(n) {
 // consignment and PPECB sheet; EU: the same but no phyto), drawn as the
 // farm's forms, in place of the Bekfontein delivery note a local note
 // prints. The market is read off the pallets' market names (USA Sea
-// Freight, EU Air Freight).
+// Freight, EU Air Freight). As Excel, or as one PDF of every sheet.
 function exportButtons(note) {
   const markets = (note.pallets || []).map((p) => p.market_name || "");
   return EXPORT_MARKETS.filter(([, , re]) => markets.some((m) => re.test(m))).map(([key, label]) =>
-    `<button type="button" data-export="${key}_forms" class="w-full border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-file-excel"></i> Print or share ${label} documents</button>`).join("");
+    [["xlsx", "fa-file-excel", "Excel"], ["pdf", "fa-file-pdf", "PDF"]].map(([ext, icon, kind]) =>
+      `<button type="button" data-export="${key}_forms.${ext}" class="w-full border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid ${icon}"></i> Print or share ${label} documents (${kind})</button>`).join("")).join("");
 }
 
 // The server makes the PDF, so the note must have reached it: a copy still
@@ -373,9 +374,9 @@ async function shareNote(papers) {
   if (!n || n.synced === 0) { msg.textContent = "Still sending this note - try again when the pill says synced."; Store.syncNow(); return; }
   msg.textContent = "";
   try {
-    // papers: an export market's papers as Excel ("usa_forms", "eu_forms"), else the note's PDF.
-    const blob = await Boord.api(`/api/deliverynote/${encodeURIComponent(n.uuid)}/${papers ? papers + ".xlsx" : "pdf"}`);
-    const name = papers ? `${papers}_${noteLabel(n)}.xlsx` : `afleweringsnota_${noteLabel(n)}.pdf`;
+    // papers: an export market's papers ("usa_forms.xlsx", "eu_forms.pdf"), else the note's PDF.
+    const blob = await Boord.api(`/api/deliverynote/${encodeURIComponent(n.uuid)}/${papers || "pdf"}`);
+    const name = papers ? papers.replace(".", `_${noteLabel(n)}.`) : `afleweringsnota_${noteLabel(n)}.pdf`;
     const file = new File([blob], name, { type: blob.type });
     if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: `Delivery note ${noteLabel(n)}` });
     else Boord.downloadBlob(blob, name);

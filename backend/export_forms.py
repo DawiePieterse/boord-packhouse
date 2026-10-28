@@ -1,4 +1,4 @@
-"""The export papers for a delivery note, as Excel, for the USA or the EU.
+"""The export papers for a delivery note, as Excel or PDF, for the USA or the EU.
 
 The USA gets three papers: DAFF's accompanying document for the phyto
 inspection, the consignment note and PPECB's litchi inspection findings
@@ -14,6 +14,7 @@ import re
 from datetime import date
 from pathlib import Path
 
+from fpdf import FPDF
 from openpyxl import Workbook
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
@@ -369,8 +370,7 @@ def _inspection(wb, f):
     ws.row_dimensions[r + 1].height = 60
 
 
-def forms(n, target: str = "", market: str = "USA") -> bytes:
-    """The papers drawn as the farm's forms; target is the note's target receiver."""
+def _workbook(n, target: str, market: str) -> Workbook:
     f = _facts(n, target, market)
     wb = Workbook()
     wb.remove(wb.active)
@@ -378,5 +378,158 @@ def forms(n, target: str = "", market: str = "USA") -> bytes:
         _phyto(wb, f)
     _consignment(wb, f)
     _inspection(wb, f)
-    return _bytes(wb)
+    return wb
+
+
+def forms(n, target: str = "", market: str = "USA") -> bytes:
+    """The papers drawn as the farm's forms; target is the note's target receiver."""
+    return _bytes(_workbook(n, target, market))
+
+
+def forms_pdf(n, target: str = "", market: str = "USA") -> bytes:
+    """The same papers as one PDF, every sheet drawn from the workbook forms()
+    makes, so the two never differ: each sheet fitted to the A4 width (the
+    Phyto form to its height too), a long one carried on to the next page
+    with its header row again."""
+    pdf = FPDF(unit="pt", format="A4")
+    pdf.set_auto_page_break(False)
+    pdf.c_margin = 0  # the cells are padded by _text
+    for ws in _workbook(n, target, market).worksheets:
+        _sheet_pdf(pdf, ws)
+    return bytes(pdf.output())
+
+
+# Drawing a worksheet in fpdf2, for the few things _put and _sheet use.
+EMU_PT = 12700
+
+
+def _latin(v) -> str:
+    # fpdf2's built-in fonts are latin-1: the tick is a v, a tick box is drawn (_rich).
+    return ("" if v is None else str(v)).replace("\u221a", "v").encode("latin-1", "replace").decode("latin-1")
+
+
+def _rgb(color, default=(0, 0, 0)):
+    rgb = getattr(color, "rgb", None)
+    return tuple(int(rgb[-6:][i:i + 2], 16) for i in (0, 2, 4)) if isinstance(rgb, str) else default
+
+
+def _font(pdf, font, scale, size=None, bold=None):
+    style = ("B" if (font.b if bold is None else bold) else "") + ("I" if font.i else "")
+    pdf.set_font("Helvetica", style, (size or font.sz or 11) * scale)
+    pdf.set_text_color(*_rgb(font.color))
+
+
+def _rich(pdf, cell, x, y, w, h, scale):
+    """Tick boxes (_boxes) laid out word by word: each box a square drawn
+    with its item beside it, an item kept whole on a line."""
+    _font(pdf, cell.font, scale, size=10)
+    pad, lh = 4 * scale, 12 * scale
+    size = pdf.font_size * 0.9
+    items = [b.text.strip() for b in cell.value if b.text.strip() != "\u2610"]
+    widths = [size + 3 * scale + pdf.get_string_width(_latin(t)) for t in items]
+    lines, line = [], []
+    for t, iw in zip(items, widths):
+        if line and sum(x[1] for x in line) + 8 * scale * len(line) + iw > w - 2 * pad:
+            lines.append(line)
+            line = []
+        line.append((t, iw))
+    lines.append(line)
+    centre = cell.alignment.horizontal == "center"
+    ty = y + (h - lh * len(lines)) / 2
+    for line in lines:
+        used = sum(x[1] for x in line) + 8 * scale * (len(line) - 1)
+        tx = x + ((w - used) / 2 if centre else pad)
+        for t, iw in line:
+            pdf.rect(tx, ty + (lh - size) / 2, size, size)
+            pdf.set_xy(tx + size + 2 * scale, ty)
+            pdf.cell(iw - size, lh, _latin(t))
+            tx += iw + 8 * scale
+        ty += lh
+
+
+def _text(pdf, cell, x, y, w, h, scale):
+    a = cell.alignment
+    _font(pdf, cell.font, scale)
+    lh = pdf.font_size * 1.2
+    if a.text_rotation == 90:  # read bottom to top: drawn across a box turned on its side
+        cx, cy = x + w / 2, y + h / 2
+        x, y, w, h = cx - h / 2, cy - w / 2, h, w
+    pad = 5 * scale if a.indent else 1.5 * scale
+    text = _latin(cell.value)
+    widest = max((pdf.get_string_width(word) for word in text.split()), default=0)
+    if widest > w - 2 * pad:  # a long number (a pallet ID) is shrunk to fit, never broken
+        pdf.set_font_size(pdf.font_size_pt * (w - 2 * pad) / widest)
+        lh = pdf.font_size * 1.2
+    lines = len(pdf.multi_cell(w - 2 * pad, lh, text, dry_run=True, output="LINES"))
+    top = y + 2 * scale if a.vertical == "top" else y + (h - lines * lh) / 2
+    align = {"center": "C", "right": "R"}.get(a.horizontal, "L")
+    if a.text_rotation == 90:
+        with pdf.rotation(90, cx, cy):
+            pdf.set_xy(x + pad, top)
+            pdf.multi_cell(w - 2 * pad, lh, text, align=align)
+    else:
+        pdf.set_xy(x + pad, top)
+        pdf.multi_cell(w - 2 * pad, lh, text, align=align)
+
+
+def _sheet_pdf(pdf, ws):
+    cols = [ws.column_dimensions[chr(65 + i)].width or 8.43 for i in range(ws.max_column)]
+    colw = [(w * 7 + 5) * 0.75 for w in cols]  # Excel's character width in points
+    rowh = {r: ws.row_dimensions[r].height or 15 for r in range(1, ws.max_row + 1)}
+    m = ws.page_margins
+    left, top = m.left * 72, m.top * 72
+    room_w, room_h = pdf.w - 2 * left, pdf.h - 2 * top
+    scale = min(1, room_w / sum(colw))
+    if ws.page_setup.fitToHeight == 1:
+        scale = min(scale, room_h / sum(rowh.values()))
+    x0 = (pdf.w - sum(colw) * scale) / 2
+    xs = [x0 + sum(colw[:i]) * scale for i in range(len(colw) + 1)]
+    spans = {}  # a merged block's top-left cell: its last row and column
+    hidden = set()
+    for rng in ws.merged_cells.ranges:
+        spans[(rng.min_row, rng.min_col)] = (rng.max_row, rng.max_col)
+        hidden |= {(r, c) for r in range(rng.min_row, rng.max_row + 1) for c in range(rng.min_col, rng.max_col + 1)}
+    titles = ws.print_title_rows
+    head = [int(r) for r in titles.replace("$", "").split(":")] if titles else []
+    pdf.set_draw_color(*_rgb(LINE.color))
+    pdf.set_line_width(0.5 * scale)
+
+    def draw_row(r, y):
+        for c in range(1, len(colw) + 1):
+            if (r, c) in hidden and (r, c) not in spans:
+                continue
+            r2, c2 = spans.get((r, c), (r, c))
+            cell = ws.cell(r, c)
+            x, w = xs[c - 1], xs[c2] - xs[c - 1]
+            h = sum(rowh[k] for k in range(r, r2 + 1)) * scale
+            if cell.fill.fill_type == "solid":
+                pdf.set_fill_color(*_rgb(cell.fill.fgColor, (255, 255, 255)))
+                pdf.rect(x, y, w, h, style="F")
+            if cell.border.left.style:
+                pdf.rect(x, y, w, h)
+            if isinstance(cell.value, CellRichText):
+                _rich(pdf, cell, x, y, w, h, scale)
+            elif cell.value not in (None, ""):
+                _text(pdf, cell, x, y, w, h, scale)
+
+    pdf.add_page()
+    for img in ws._images:
+        a = img.anchor
+        ext = a.pic.spPr.xfrm.ext
+        x = xs[a._from.col] + a._from.colOff / EMU_PT * scale
+        y = top + sum(rowh[k] for k in range(1, a._from.row + 1)) * scale + a._from.rowOff / EMU_PT * scale
+        pdf.image(str(LOGO), x, y, ext.cx / EMU_PT * scale, ext.cy / EMU_PT * scale)
+    y = top
+    for r in range(1, ws.max_row + 1):
+        # A merged block is kept whole: the page breaks before its first row.
+        tall = max([sum(rowh[k] for k in range(r, spans[(r, c)][0] + 1)) for c in range(1, len(colw) + 1)
+                    if (r, c) in spans] + [rowh[r]]) * scale
+        if y + tall > top + room_h + 0.5:
+            pdf.add_page()
+            y = top
+            for t in range(head[0], head[-1] + 1) if head and r > head[-1] else ():
+                draw_row(t, y)
+                y += rowh[t] * scale
+        draw_row(r, y)
+        y += rowh[r] * scale
 

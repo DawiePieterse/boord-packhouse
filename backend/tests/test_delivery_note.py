@@ -148,6 +148,16 @@ def test_usa_forms_are_drawn_from_the_note(client, pallets):
     assert (ins["A11"].value, ins["D11"].value) == ("B2", "USA")
 
 
+def test_export_forms_also_come_as_one_pdf(client, pallets):
+    sync(client, note(pallets=("p1", "p2")))
+    r = client.get("/api/deliverynote/n1/usa_forms.pdf")
+    assert r.status_code == 200 and 'usa_forms_LW-1335.pdf' in r.headers["content-disposition"]
+    assert r.content.startswith(b"%PDF") and r.content.count(b"/Type /Page\n") == 3  # a page a sheet
+    assert client.get("/api/deliverynote/n1/eu_forms.pdf").content.count(b"/Type /Page\n") == 2  # no phyto
+    assert client.get("/api/deliverynote/n1/uk_forms.pdf").status_code == 404
+    assert client.get("/api/deliverynote/nope/usa_forms.pdf").status_code == 404
+
+
 def test_usa_forms_keep_phyto_on_one_page_and_print_the_target_receiver():
     import json as _json
     from io import BytesIO
