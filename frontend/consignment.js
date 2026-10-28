@@ -99,7 +99,10 @@ function seasonView() {
     return groupHead(key, `${group.length} pallet${group.length === 1 ? "" : "s"} · ${sum(group, palletCartons)} cartons · ${kgText(sum(group, palletKg))}`)
       + group.map((p) => {
         const freed = freedBy(p.uuid);
-        return `<div class="${groupRow(key, false, "block", freed ? "ring-4 ring-inset ring-amber-400 bg-amber-50" : "opacity-50 grayscale")}">${palletSummary(p)}${freed ? freedTag(freed) : ""}</div>`;
+        // A freed one opens to change it, or split it: take cartons off here, add a new pallet for them.
+        return freed
+          ? `<button type="button" data-pallet="${esc(p.uuid)}" class="${groupRow(key, false, "block", "ring-4 ring-inset ring-amber-400 bg-amber-50")}">${palletSummary(p)}${freedTag(freed)}<div class="text-xs text-amber-800">Tap to change or split it.</div></button>`
+          : `<div class="${groupRow(key, false, "block", "opacity-50 grayscale")}">${palletSummary(p)}</div>`;
       }).join("");
   }).join("");
   return `
@@ -107,7 +110,7 @@ function seasonView() {
       <div class="${LIST_HEAD}">
         <div class="text-lg font-bold">Pallets this season (${season})</div>
         <div class="text-base"><b>${pallets.length}</b> pallet${pallets.length === 1 ? "" : "s"} · <b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b></div>
-        <div class="text-xs text-white/80">Highlighted: its delivery note was deleted, so it can go on another.</div>
+        <div class="text-xs text-white/80">Highlighted: its delivery note was deleted, so it can go on another. Tap one to change or split it.</div>
       </div>
       ${rows}
     </div>`;
