@@ -274,11 +274,13 @@ class Transporter(SQLModel, table=True):
 
 
 class Receiver(SQLModel, table=True):
-    """Who a delivery note is for: name, market and city, set up in Settings ->
+    """Who a delivery note is for: name, market, address and city, set up in Settings ->
     Delivery Note. A note copies them as its receiver text, one per line."""
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     market: str = ""
+    address_1: str = ""
+    address_2: str = ""
     city: str = ""
     sort: int = 0
     active: bool = True
@@ -316,7 +318,7 @@ class DeliveryNote(SQLModel, table=True):
     uuid: str = Field(primary_key=True)
     note_no: int
     created_at: datetime
-    receiver_id: Optional[int] = None    # Settings' receiver, its name, market and city copied:
+    receiver_id: Optional[int] = None    # Settings' receiver, its name, market, address and city copied:
     receiver: str = ""                   # Ontvanger, one per line
     transporter_id: Optional[int] = None
     transporter: str = ""

@@ -473,12 +473,12 @@ def _live(uuid: str, session: Session) -> DeliveryNote:
     n = session.get(DeliveryNote, uuid)
     if n is None or n.removed:
         raise HTTPException(404, "No such delivery note")
-    # A note copied with only its receiver's name (its market and city set up in
+    # A note copied with only its receiver's name (its market, address and city set up in
     # Settings afterwards) prints them from Settings; never saved back.
     r = session.get(Receiver, n.receiver_id) if n.receiver_id is not None else None
     if r is not None and len([x for x in n.receiver.split("\n") if x.strip()]) == 1:
         session.expunge(n)
-        n.receiver = "\n".join(x for x in (n.receiver.strip(), r.market, r.city) if x)
+        n.receiver = "\n".join(x for x in (n.receiver.strip(), r.market, r.address_1, r.address_2, r.city) if x)
     return n
 
 

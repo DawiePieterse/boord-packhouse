@@ -230,3 +230,16 @@ def test_a_receiver_copied_with_only_its_name_prints_its_market_and_city(client,
     c = load_workbook(BytesIO(client.get("/api/deliverynote/n1/eu_forms.xlsx").content))["Consignment"]
     assert (c["E4"].value, c["E5"].value, c["E6"].value) == ("ToroFruit", "Joburg Mark", "Johannesburg")
     assert notes(client)[0]["receiver"] == "ToroFruit"  # the note's own copy is untouched
+
+
+def test_a_receivers_address_prints_between_its_market_and_city(client, admin_client, pallets):
+    r = admin_client.post("/api/settings/receivers", json={"name": "ToroFruit", "market": "Joburg Mark",
+                                                           "address_1": " Stand 5 ", "address_2": "", "city": "Johannesburg"}).json()
+    assert (r["address_1"], r["address_2"]) == ("Stand 5", "")  # either line may stay empty
+    assert admin_client.post("/api/settings/receivers", json={"name": "Bare"}).status_code == 200
+    sync(client, note(receiver_id=r["id"], receiver="ToroFruit"))
+    assert client.get("/api/deliverynote/n1/eu_forms.xlsx").status_code == 200  # an export note with no target receiver
+    from routers.delivery_note import _live
+    from db import get_packhouse_session
+    s = next(client.app.dependency_overrides.get(get_packhouse_session, get_packhouse_session)())
+    assert _live("n1", s).receiver == "ToroFruit\nJoburg Mark\nStand 5\nJohannesburg"
