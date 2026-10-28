@@ -85,8 +85,20 @@ def test_crates_are_numbered_apart_and_go_on_the_note_after_the_bins(client):
     assert sync(client, jbin(), crate)["synced"] == ["b1", "c1"]  # bin 88 and crate 88
     assert "crate 88 is already used" in sync(client, jbin("c2", 88, container="crate"))["rejected"][0]["error"]
     assert "a bin or a crate" in sync(client, jbin("x", 1, container="box"))["rejected"][0]["error"]
-    sync(client, jbin("c3", 89, container="crate", full_kg=None))
-    assert "crate 89 needs its empty and full" in sync_notes(client, juice_note("c3"))["rejected"][0]["error"]
+    assert "weight per crate" in sync(client, jbin("c3", 89, container="crate", full_kg=None))["rejected"][0]["error"]
     sync_notes(client, juice_note("c1", "b1"))
     assert [(b["container"], b["bin_no"]) for b in notes(client)[0]["bins"]] == [("bin", 88), ("crate", 88)]
+    assert client.get("/api/deliverynote/n1/pdf").status_code == 200
+
+
+def test_a_crate_record_is_a_batch_counted_not_weighed(client):
+    batch = jbin("c1", 1, container="crate", count=12, empty_kg=None, full_kg=20)
+    assert "weight per crate" in sync(client, {**batch, "full_kg": None})["rejected"][0]["error"]
+    assert "a bin is one bin" in sync(client, jbin("b9", 9, count=3))["rejected"][0]["error"]
+    sync(client, batch, jbin())
+    sync_notes(client, juice_note("c1", "b1"))
+    assert notes(client)[0]["bins"][1]["count"] == 12
+    from routers.delivery_note import _bin_net, _containers
+    assert [_bin_net(b) for b in notes(client)[0]["bins"]] == [466, 240]  # 12 x 20 kg
+    assert _containers(notes(client)[0]["bins"]) == "1 bin · 12 crates"
     assert client.get("/api/deliverynote/n1/pdf").status_code == 200

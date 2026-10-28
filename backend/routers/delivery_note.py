@@ -121,7 +121,7 @@ def _bins_problem(rec: NoteIn, session: Session) -> Optional[str]:
         b = session.get(JuiceBin, uuid)
         if b is None or b.removed:
             return "a bin or crate on it is not on the server (yet), or was deleted"
-        if b.empty_kg is None or b.full_kg is None:
+        if b.full_kg is None or (b.empty_kg is None and b.container == "bin"):
             return f"{b.container} {b.bin_no} needs its empty and full weights"
     # ponytail: scans every live note, as for the pallets
     others = session.exec(select(DeliveryNote).where(DeliveryNote.uuid != rec.uuid, DeliveryNote.removed == False)).all()  # noqa: E712
@@ -146,7 +146,7 @@ def _copy(p: Pallet) -> dict:
 
 
 def _copy_bin(b: JuiceBin) -> dict:
-    return {"uuid": b.uuid, "container": b.container, "bin_no": b.bin_no, "empty_kg": b.empty_kg, "full_kg": b.full_kg}
+    return {"uuid": b.uuid, "container": b.container, "count": b.count, "bin_no": b.bin_no, "empty_kg": b.empty_kg, "full_kg": b.full_kg}
 
 
 def note_out(n: DeliveryNote) -> dict:
@@ -259,6 +259,8 @@ def _pallet_kg(p: dict) -> float:
 
 
 def _bin_net(b: dict) -> float:
+    if b["empty_kg"] is None:  # a batch of crates: count x weight per crate
+        return b.get("count", 1) * b["full_kg"]
     return b["full_kg"] - b["empty_kg"]
 
 
@@ -268,8 +270,8 @@ def _container(b: dict) -> str:
 
 
 def _containers(bins: list) -> str:
-    """2 bins · 1 crate: the ones there are."""
-    counts = [(k, sum(b.get("container", "bin") == k for b in bins)) for k in ("bin", "crate")]
+    """2 bins · 12 crates: the ones there are, every crate in a batch counted."""
+    counts = [(k, sum(b.get("count", 1) for b in bins if b.get("container", "bin") == k)) for k in ("bin", "crate")]
     return " · ".join(f"{n} {k}{'' if n == 1 else 's'}" for k, n in counts if n)
 
 
@@ -396,7 +398,9 @@ def _draw(n: DeliveryNote, pages: int):
                 pdf.add_page()
                 head()
             text(11, _container(b), "B", border=1, w=col, h=6, align="C")
-            value(f"  {_kg(b['full_kg'])} - {_kg(b['empty_kg'])} = {_kg(_bin_net(b))} kg", border=1, w=w - col, h=6,
+            weights = (f"{b.get('count', 1)} x {_kg(b['full_kg'])}" if b["empty_kg"] is None  # a batch of crates
+                       else f"{_kg(b['full_kg'])} - {_kg(b['empty_kg'])}")
+            value(f"  {weights} = {_kg(_bin_net(b))} kg", border=1, w=w - col, h=6,
                   new_x="LMARGIN", new_y="NEXT")
         total = f"{_containers(bins)} · {_kg(sum(map(_bin_net, bins)))} kg"
     else:
@@ -450,9 +454,7 @@ def _draw(n: DeliveryNote, pages: int):
 def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     """The note as the paper Afleweringsnota, on A4, signature lines blank.
     Only a local note has one: an export note goes out on its market's papers."""
-    n = session.get(DeliveryNote, uuid)
-    if n is None or n.removed:
-        raise HTTPException(404, "No such delivery note")
+    n = _live(uuid, session)
     if export_forms.note_label(n).startswith("LW"):
         raise HTTPException(409, "An export note goes out on its market's documents, not the delivery note")
     pdf = _draw(n, _draw(n, 1).page_no())
@@ -471,6 +473,12 @@ def _live(uuid: str, session: Session) -> DeliveryNote:
     n = session.get(DeliveryNote, uuid)
     if n is None or n.removed:
         raise HTTPException(404, "No such delivery note")
+    # A note copied with only its receiver's name (its market and city set up in
+    # Settings afterwards) prints them from Settings; never saved back.
+    r = session.get(Receiver, n.receiver_id) if n.receiver_id is not None else None
+    if r is not None and len([x for x in n.receiver.split("\n") if x.strip()]) == 1:
+        session.expunge(n)
+        n.receiver = "\n".join(x for x in (n.receiver.strip(), r.market, r.city) if x)
     return n
 
 

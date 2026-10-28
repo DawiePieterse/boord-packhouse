@@ -219,3 +219,14 @@ def test_a_note_does_not_mix_markets(client, pallets):
     assert sync(client, note(pallets=("p1", "p3")))["rejected"][0]["error"] == "a note is all USA, all EU or all local pallets"
     assert sync(client, note(pallets=("p1", "p2")))["synced"] == ["n1"]
     assert [market_group(m) for m in ("USA Air Freight", "EU Sea Freight", "Local", "")] == ["usa", "eu", "local", "local"]
+
+
+def test_a_receiver_copied_with_only_its_name_prints_its_market_and_city(client, admin_client, pallets):
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+    r = admin_client.post("/api/settings/receivers", json={"name": "ToroFruit", "market": "Joburg Mark", "city": "Johannesburg"}).json()
+    sync(client, note(receiver_id=r["id"], receiver="ToroFruit"))  # its market and city set in Settings later
+    c = load_workbook(BytesIO(client.get("/api/deliverynote/n1/eu_forms.xlsx").content))["Consignment"]
+    assert (c["E4"].value, c["E5"].value, c["E6"].value) == ("ToroFruit", "Joburg Mark", "Johannesburg")
+    assert notes(client)[0]["receiver"] == "ToroFruit"  # the note's own copy is untouched

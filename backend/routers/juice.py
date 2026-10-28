@@ -31,6 +31,7 @@ CONTAINERS = {"bin": "bin", "crate": "crate"}
 class BinIn(SQLModel):
     uuid: str
     container: str = "bin"
+    count: int = 1
     bin_no: int
     weighed_at: datetime
     empty_kg: Optional[float] = None
@@ -56,6 +57,10 @@ def _bin_problem(rec: BinIn, session: Session) -> Optional[str]:
         return "a juice container is a bin or a crate"
     if rec.bin_no < 1:
         return f"the {rec.container} number is a whole number from 1"
+    if rec.count < 1 or (rec.container == "bin" and rec.count != 1):
+        return "a batch is 1 crate or more; a bin is one bin"
+    if rec.container == "crate" and rec.full_kg is None:
+        return "a batch of crates needs its weight per crate"
     if rec.empty_kg is None and rec.full_kg is None:
         return f"a {rec.container} needs its empty or full weight"
     if any(kg is not None and not 0 < kg < 5000 for kg in (rec.empty_kg, rec.full_kg)):
@@ -96,7 +101,7 @@ def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
                            device=body.device, synced_at=now, made_by=rec.made_by, made_by_name=rec.made_by_name)
         row.removed, row.changed_by, row.changed_by_name = rec.removed, rec.changed_by, rec.changed_by_name
         if not rec.removed:
-            row.bin_no, row.empty_kg, row.full_kg = rec.bin_no, rec.empty_kg, rec.full_kg
+            row.bin_no, row.count, row.empty_kg, row.full_kg = rec.bin_no, rec.count, rec.empty_kg, rec.full_kg
         session.add(row)
         session.flush()  # the next bin in this pass sees this one's number
         synced.append(rec.uuid)
