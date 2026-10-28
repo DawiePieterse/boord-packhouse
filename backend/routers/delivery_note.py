@@ -450,9 +450,7 @@ def _draw(n: DeliveryNote, pages: int):
 def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     """The note as the paper Afleweringsnota, on A4, signature lines blank.
     Only a local note has one: an export note goes out on its market's papers."""
-    n = session.get(DeliveryNote, uuid)
-    if n is None or n.removed:
-        raise HTTPException(404, "No such delivery note")
+    n = _live(uuid, session)
     if export_forms.note_label(n).startswith("LW"):
         raise HTTPException(409, "An export note goes out on its market's documents, not the delivery note")
     pdf = _draw(n, _draw(n, 1).page_no())
@@ -471,6 +469,12 @@ def _live(uuid: str, session: Session) -> DeliveryNote:
     n = session.get(DeliveryNote, uuid)
     if n is None or n.removed:
         raise HTTPException(404, "No such delivery note")
+    # A note copied with only its receiver's name (its market and city set up in
+    # Settings afterwards) prints them from Settings; never saved back.
+    r = session.get(Receiver, n.receiver_id) if n.receiver_id is not None else None
+    if r is not None and len([x for x in n.receiver.split("\n") if x.strip()]) == 1:
+        session.expunge(n)
+        n.receiver = "\n".join(x for x in (n.receiver.strip(), r.market, r.city) if x)
     return n
 
 
