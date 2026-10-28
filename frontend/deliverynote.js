@@ -45,31 +45,44 @@ function renderDeliveryNote() {
   $("deliveryBody").innerHTML = dn.view === "note" ? noteForm() : notesView();
 }
 
-// The 30 newest notes under a heading per market group (USA, EU, Local),
-// newest first within each, each with its market.
+// Today's notes (made on this phone's day, and any refused one whatever its
+// day, so it is never lost), then every earlier one this phone holds (90
+// days) greyed, still tapped to edit or delete. Each under a heading per
+// market group (USA, EU, Local), newest first within it, with its market.
 function notesView() {
-  const recent = Store.notes().slice(0, 30);
-  const rows = MARKET_GROUPS.map(([key]) => {
-    const group = recent.filter((n) => noteGroup(n) === key);
+  const today = (n) => sameDay(n.created_at) || n.error;
+  const grouped = (notes, dim) => MARKET_GROUPS.map(([key]) => {
+    const group = notes.filter((n) => noteGroup(n) === key);
     if (!group.length) return "";
-    return groupHead(key, `${group.length} note${group.length === 1 ? "" : "s"}`) + group.map(noteRow).join("");
+    return groupHead(key, `${group.length} note${group.length === 1 ? "" : "s"}`) + group.map((n) => noteRow(n, dim)).join("");
   }).join("");
+  const rows = grouped(Store.notes().filter(today));
+  const earlier = Store.notes().filter((n) => !today(n));
   return `
     <div class="bg-white rounded-2xl shadow p-4">
       <button type="button" data-addnote class="w-full boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-file-lines"></i> New delivery note</button>
     </div>
     <div class="bg-white rounded-2xl shadow px-4 pb-1">
       <div class="${LIST_HEAD}">
-        <div class="text-lg font-bold">Recent delivery notes</div>
+        <div class="text-lg font-bold">Delivery notes added today</div>
         <div class="text-xs text-white/80">Tap a note to edit, print or share it.</div>
       </div>
-      ${rows || `<div class="text-center text-slate-400 text-sm py-6 border-t">No delivery notes yet</div>`}
-    </div>`;
+      ${rows || `<div class="text-center text-slate-400 text-sm py-6 border-t">No delivery notes yet today</div>`}
+    </div>
+    ${earlier.length ? `
+    <div class="bg-white rounded-2xl shadow px-4 pb-1">
+      <div class="${LIST_HEAD}">
+        <div class="text-lg font-bold">Earlier delivery notes</div>
+        <div class="text-base"><b>${earlier.length}</b> note${earlier.length === 1 ? "" : "s"}</div>
+        <div class="text-xs text-white/80">Tap a note to edit, print, share or delete it.</div>
+      </div>
+      ${grouped(earlier, true)}
+    </div>` : ""}`;
 }
 
-function noteRow(n) {
+function noteRow(n, dim) {
   return `
-    <button type="button" data-note="${esc(n.uuid)}" class="${groupRow(noteGroup(n))}">
+    <button type="button" data-note="${esc(n.uuid)}" class="${groupRow(noteGroup(n), false, "block", dim ? "opacity-50 grayscale" : "")}">
       <div class="flex justify-between gap-3 items-baseline">
         <div class="font-bold text-lg">Note ${esc(noteLabel(n))}</div>
         <div class="text-sm shrink-0">${esc(dnDay(n.loaded_on))}</div>
