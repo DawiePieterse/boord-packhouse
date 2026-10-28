@@ -75,7 +75,7 @@ function binsView() {
         <button type="button" data-addbin="bin" class="boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-weight-scale"></i> New bin</button>
         <button type="button" data-addbin="crate" class="boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-box"></i> New crate</button>
       </div>
-      <button type="button" data-juicenote class="w-full mt-3 border-2 border-[var(--boord-blue)] text-[var(--boord-blue)] rounded-xl py-4 text-lg font-bold"><i class="fa-solid fa-file-lines"></i> New delivery note</button>
+      <button type="button" data-juicenote class="w-full mt-3 border-2 border-[var(--boord-blue)] text-[var(--boord-blue)] rounded-xl py-4 text-lg font-bold"><i class="fa-solid fa-file-lines"></i> New Juice Delivery Note</button>
     </div>
     <div class="bg-white rounded-2xl shadow px-4 pb-1">
       <div class="${LIST_HEAD}">
@@ -84,6 +84,23 @@ function binsView() {
         <div class="text-xs text-white/80">Tap one to add its full weight, change or delete it.</div>
       </div>
       ${rows ||`<div class="text-center text-slate-400 text-sm py-6 border-t">No bins or crates yet today</div>`}
+    </div>
+    ${juiceNotesView()}`;
+}
+
+// The juice delivery notes (J-), as the Delivery Note screen lists them:
+// today's, then the earlier ones this phone holds greyed. Tapping one opens
+// it there, and leaving it comes back here.
+function juiceNotesView() {
+  const notes = Store.notes().filter(isJuiceNote);
+  const today = (n) => sameDay(n.created_at) || n.error;
+  return `
+    <div class="bg-white rounded-2xl shadow px-4 pb-1">
+      <div class="${LIST_HEAD}">
+        <div class="text-lg font-bold">Delivery Notes</div>
+        <div class="text-xs text-white/80">Tap a note to edit, print or share it.</div>
+      </div>
+      ${notes.map((n) => noteRow(n, !today(n))).join("") || `<div class="text-center text-slate-400 text-sm py-6 border-t">No juice delivery notes yet</div>`}
     </div>`;
 }
 
@@ -171,7 +188,8 @@ function onJuiceClick(ev) {
   if (t.dataset.bin) openBin(Store.bins().find((b) => b.uuid === t.dataset.bin));
   else if (t.dataset.addbin) openBin(null, t.dataset.addbin);
   // A juice note, on the Delivery Note screen (deliverynote.js): only the full bins and crates to pick from.
-  else if ("juicenote" in t.dataset) { openNote(null, true); location.hash = "#deliverynote"; }
+  else if ("juicenote" in t.dataset) { dn.from = "juice"; openNote(null, true); location.hash = "#deliverynote"; }
+  else if (t.dataset.note) { dn.from = "juice"; openNote(Store.notes().find((n) => n.uuid === t.dataset.note)); location.hash = "#deliverynote"; }
   else if ("back" in t.dataset) { jc.view = "list"; renderJuice(); }
   else if ("savebin" in t.dataset) saveBin();
   else if ("removebin" in t.dataset) removeBin();

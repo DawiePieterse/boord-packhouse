@@ -14,7 +14,17 @@
 // renderOperatorBar from sulfur.js, $, esc from app.js and palletSummary,
 // palletCartons, palletKg, kgText and sum from consignment.js.
 
-let dn = { view: "list", draft: null };
+// from: "juice" while a note opened from the Juice screen is open; leaving it goes back there.
+let dn = { view: "list", draft: null, from: null };
+
+// Done with the open note: back to the list it came from (the Juice screen's
+// Delivery Notes, or this screen's).
+function leaveNote() {
+  dn.view = "list";
+  if (dn.from === "juice") { dn.from = null; location.hash = "#juice"; return; }
+  renderDeliveryNote();
+  window.scrollTo(0, 0);
+}
 let sealScanner = null;
 let sealConfirm = null; // twiceInARow (consignment.js)
 
@@ -86,9 +96,16 @@ function notesView() {
     </div>` : ""}`;
 }
 
+// A juice note's colour says what it holds: bins (orange), crates (yellow) or both (rose).
+function juiceRowKey(n) {
+  const kinds = new Set(n.bins.map(containerOf));
+  return kinds.size > 1 ? "mixed" : kinds.has("crate") ? "crates" : "juice";
+}
+
 function noteRow(n, dim) {
+  const key = noteGroup(n) === "juice" ? juiceRowKey(n) : noteGroup(n);
   return `
-    <button type="button" data-note="${esc(n.uuid)}" class="${groupRow(noteGroup(n), false, "block", dim ? "opacity-50 grayscale" : "")}">
+    <button type="button" data-note="${esc(n.uuid)}" class="${groupRow(key, false, "block", dim ? "opacity-50 grayscale" : "")}">
       <div class="flex justify-between gap-3 items-baseline">
         <div class="font-bold text-lg">Note ${esc(noteLabel(n))}</div>
         <div class="text-sm shrink-0">${esc(dnDay(n.loaded_on))}</div>
@@ -192,7 +209,7 @@ function noteForm() {
     <div class="flex items-center gap-3">
       <button type="button" data-back class="px-3 py-2 rounded-lg border border-slate-300 bg-white"><i class="fa-solid fa-arrow-left"></i></button>
       <div class="flex-1 min-w-0">
-        <div class="font-semibold">${d.note ? `Delivery note ${esc(noteLabel(d.note))}` : "New delivery note"}</div>
+        <div class="font-semibold">${d.note ? `Delivery note ${esc(noteLabel(d.note))}` : d.juice ? "New Juice Delivery Note" : "New delivery note"}</div>
         ${locked ? `<div class="text-sm font-semibold text-blue-800">${esc(d.juice ? "Juice" : noteMarkets({ pallets: picked }))}</div>` : ""}
       </div>
     </div>
@@ -305,10 +322,8 @@ async function saveNote() {
                         seal_no: d.juice ? "" : d.seal_no.trim(), cooled_to: d.juice ? "" : d.cooled_to.trim(),
                         loaded_on: d.loaded_on, offloaded_on: d.offloaded_on, pallets, bins,
                         changed_by: op.id || "", changed_by_name: op.name || "", removed: false, rev: Date.now() });
-  // Back to the overview, where the note now shows; tap it there to print or share it.
-  dn.view = "list";
-  renderDeliveryNote();
-  window.scrollTo(0, 0);
+  // Back to the list, where the note now shows; tap it there to print or share it.
+  leaveNote();
 }
 
 // Wants the settings PIN (askPin, app.js); its pallets or bins are then free for another note.
@@ -319,7 +334,7 @@ function removeNote() {
     const op = Operator.current() || {};
     await Store.saveRun({ ...note, kind: "delivery_note", removed: true, changed_by: op.id || "",
                           changed_by_name: op.name || "", rev: Date.now() });
-    dn.view = "list";
+    leaveNote();
   });
 }
 
@@ -374,14 +389,9 @@ function onDeliveryClick(ev) {
   const t = ev.target.closest("button");
   if (!t) return;
   const d = dn.draft;
-  if (t.dataset.note) openNote(Store.notes().find((n) => n.uuid === t.dataset.note));
-  else if ("addnote" in t.dataset) openNote(null);
-  else if ("back" in t.dataset) {
-    dn.view = "list";
-    // A new juice note goes back to the Juice screen it came from.
-    if (d.juice && !d.note) location.hash = "#juice";
-    else renderDeliveryNote();
-  }
+  if (t.dataset.note) { dn.from = null; openNote(Store.notes().find((n) => n.uuid === t.dataset.note)); }
+  else if ("addnote" in t.dataset) { dn.from = null; openNote(null); }
+  else if ("back" in t.dataset) leaveNote();
   else if (t.dataset.pick) {
     const u = t.dataset.pick;
     if (t.disabled) return; // another market's pallet
