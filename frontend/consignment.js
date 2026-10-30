@@ -113,11 +113,9 @@ function seasonView() {
   }).join("");
   return `
     <div class="bg-white rounded-2xl shadow px-4 pb-1">
-      <div class="${LIST_HEAD}">
-        <div class="text-lg font-bold">Pallets this season (${season})</div>
-        <div class="text-base"><b>${pallets.length}</b> pallet${pallets.length === 1 ? "" : "s"} · <b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b></div>
-        <div class="text-xs text-white/80">Tap a market to show or hide its pallets, a pallet to edit or delete it. Highlighted: its delivery note was deleted, so it can go on another.</div>
-      </div>
+      ${seasonHead(`Pallets this season (${season})`,
+        `<b>${pallets.length}</b> pallet${pallets.length === 1 ? "" : "s"} · <b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b>`,
+        "Tap a market to show or hide its pallets, a pallet to edit or delete it. Highlighted: its delivery note was deleted, so it can go on another.")}
       ${rows}
     </div>`;
 }
@@ -177,6 +175,16 @@ function toggleFold(id, render) {
 // The head of a list card (Pallets added today; a delivery note's pallets): a
 // dark blue band across the card's top, so the totals stand out from the rows.
 const LIST_HEAD = "-mx-4 px-4 py-3 mb-1 rounded-t-2xl bg-[var(--boord-blue)] text-white";
+
+// The head of a season card (Pallets this season, Deliveries this season):
+// LIST_HEAD's shape in grey, quieter than today's blue, since today's list
+// is the one being worked on. Title, totals, then what tapping does.
+const seasonHead = (title, totals, hint) => `
+      <div class="-mx-4 px-4 py-3 mb-1 rounded-t-2xl bg-slate-200 text-slate-800">
+        <div class="text-lg font-bold">${title}</div>
+        <div class="text-base">${totals}</div>
+        <div class="text-xs text-slate-600">${hint}</div>
+      </div>`;
 
 // One pallet as the list shows it: number, cartons and kg, date code, supplier,
 // market, barcode and its lines. The delivery note shows pallets the same way.
