@@ -65,12 +65,15 @@ function renderDeliveryNote() {
 // day, so it is never lost), then every earlier one this phone holds (90
 // days) greyed, still tapped to edit or delete. Each under a heading per
 // market group (USA, EU, Local), newest first within it, with its market.
+// The earlier notes' groups are folded until opened (foldHead, consignment.js).
 function notesView() {
   const today = (n) => sameDay(n.created_at) || n.error;
   const grouped = (notes, dim) => MARKET_GROUPS.map(([key]) => {
     const group = notes.filter((n) => noteGroup(n) === key);
     if (!group.length) return "";
-    return groupHead(key, `${group.length} note${group.length === 1 ? "" : "s"}`) + group.map((n) => noteRow(n, dim)).join("");
+    const right = `${group.length} note${group.length === 1 ? "" : "s"}`;
+    if (!dim) return groupHead(key, right) + group.map((n) => noteRow(n)).join("");
+    return foldHead("earlier", key, right) + (isOpen("earlier", key) ? group.map((n) => noteRow(n, dim)).join("") : "");
   }).join("");
   const rows = grouped(Store.notes().filter(today));
   const earlier = Store.notes().filter((n) => !today(n));
@@ -90,7 +93,7 @@ function notesView() {
       <div class="${LIST_HEAD}">
         <div class="text-lg font-bold">Earlier delivery notes</div>
         <div class="text-base"><b>${earlier.length}</b> note${earlier.length === 1 ? "" : "s"}</div>
-        <div class="text-xs text-white/80">Tap a note to edit, print, share or delete it.</div>
+        <div class="text-xs text-white/80">Tap a market to show or hide its notes, a note to edit, print, share or delete it.</div>
       </div>
       ${grouped(earlier, true)}
     </div>` : ""}`;
@@ -391,6 +394,7 @@ function onDeliveryClick(ev) {
   if (!t) return;
   const d = dn.draft;
   if (t.dataset.note) { dn.from = null; openNote(Store.notes().find((n) => n.uuid === t.dataset.note)); }
+  else if (t.dataset.fold) toggleFold(t.dataset.fold, renderDeliveryNote);
   else if ("addnote" in t.dataset) { dn.from = null; openNote(null); }
   else if ("back" in t.dataset) leaveNote();
   else if (t.dataset.pick) {

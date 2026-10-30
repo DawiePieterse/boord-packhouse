@@ -96,7 +96,13 @@ function seasonView() {
   const rows = MARKET_GROUPS.map(([key]) => {
     const group = pallets.filter((p) => marketGroup(p.market_name) === key);
     if (!group.length) return "";
-    return groupHead(key, `${group.length} pallet${group.length === 1 ? "" : "s"} · ${sum(group, palletCartons)} cartons · ${kgText(sum(group, palletKg))}`)
+    // Folded until opened, so the season's list doesn't push today's work off
+    // the screen; a group holding a freed pallet says so on its heading.
+    const freedCount = group.filter((p) => freedBy(p.uuid)).length;
+    const head = foldHead("season", key, `${group.length} pallet${group.length === 1 ? "" : "s"} · ${sum(group, palletCartons)} cartons · ${kgText(sum(group, palletKg))}`
+      + (freedCount ? `<div class="text-amber-800"><i class="fa-solid fa-rotate-left"></i> ${freedCount} free for another delivery</div>` : ""));
+    if (!isOpen("season", key)) return head;
+    return head
       + group.map((p) => {
         const freed = freedBy(p.uuid);
         // A freed one opens to change it, or split it: take cartons off here, add a new pallet for them.
@@ -110,7 +116,7 @@ function seasonView() {
       <div class="${LIST_HEAD}">
         <div class="text-lg font-bold">Pallets this season (${season})</div>
         <div class="text-base"><b>${pallets.length}</b> pallet${pallets.length === 1 ? "" : "s"} · <b>${sum(pallets, palletCartons)}</b> cartons · <b>${kgText(sum(pallets, palletKg))}</b></div>
-        <div class="text-xs text-white/80">Tap a pallet to edit or delete it. Highlighted: its delivery note was deleted, so it can go on another.</div>
+        <div class="text-xs text-white/80">Tap a market to show or hide its pallets, a pallet to edit or delete it. Highlighted: its delivery note was deleted, so it can go on another.</div>
       </div>
       ${rows}
     </div>`;
@@ -146,6 +152,27 @@ const groupHead = (key, right, dim) => `
       <div class="text-xl font-bold">${groupTitle(key)}</div>
       <div class="text-sm font-semibold text-right">${right}</div>
     </div>`;
+
+// A heading that folds its group away (Pallets this season, Earlier delivery
+// notes): the same band, the whole of it a button, with a chevron on the
+// right. Folded is the default, because these lists only grow through the
+// season and the phone is mostly used for today's. Which are open is kept
+// in memory only, so the app opens with them folded again.
+const openGroups = new Set();
+const isOpen = (list, key) => openGroups.has(`${list}:${key}`);
+const foldHead = (list, key, right) => `
+    <button type="button" data-fold="${list}:${key}" aria-expanded="${isOpen(list, key)}" class="-mx-4 px-4 w-[calc(100%+2rem)] py-2.5 mt-2 border-l-8 ${GROUP_BAND[key]} flex items-center gap-3 text-left active:brightness-95">
+      <div class="text-xl font-bold">${groupTitle(key)}</div>
+      <div class="flex-1 text-sm font-semibold text-right">${right}</div>
+      <i class="fa-solid fa-chevron-${isOpen(list, key) ? "up" : "down"} text-lg w-6 text-center"></i>
+    </button>`;
+// Opening or closing one redraws the list where it is, not back at the top.
+function toggleFold(id, render) {
+  if (openGroups.has(id)) openGroups.delete(id); else openGroups.add(id);
+  const y = window.scrollY;
+  render();
+  window.scrollTo(0, y);
+}
 
 // The head of a list card (Pallets added today; a delivery note's pallets): a
 // dark blue band across the card's top, so the totals stand out from the rows.
@@ -408,6 +435,7 @@ function onConsignmentClick(ev) {
   const d = cn.draft;
   const sync = () => { cn.draft.lines = cn.draft.lines.slice(); renderConsignment(); };
   if (t.dataset.pallet) openPallet(Store.pallets().find((p) => p.uuid === t.dataset.pallet));
+  else if (t.dataset.fold) toggleFold(t.dataset.fold, renderConsignment);
   else if ("add" in t.dataset) openPallet(null);
   else if ("cancel" in t.dataset) { cn.view = "list"; renderConsignment(); }
   else if ("scan" in t.dataset) (palletScanner ? stopPalletScan() : startPalletScan());
