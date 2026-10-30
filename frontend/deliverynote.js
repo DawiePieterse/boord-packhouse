@@ -62,18 +62,25 @@ function renderDeliveryNote() {
 }
 
 // Today's notes (made on this phone's day, and any refused one whatever its
-// day, so it is never lost), then every earlier one this phone holds (90
-// days) greyed, still tapped to edit or delete. Each under a heading per
-// market group (USA, EU, Local), newest first within it, with its market.
+// day, so it is never lost), then every earlier note of the season (calendar
+// year) this phone holds, greyed, still tapped to edit or delete; today's are
+// only in the first list, as on Pallet Stack, so none shows twice.
+// Each under a heading per market group (USA, EU, Local), newest first
+// within it, with its market. The season's groups are folded until opened
+// (foldHead, consignment.js).
 function notesView() {
   const today = (n) => sameDay(n.created_at) || n.error;
-  const grouped = (notes, dim) => MARKET_GROUPS.map(([key]) => {
+  const grouped = (notes, fold) => MARKET_GROUPS.map(([key]) => {
     const group = notes.filter((n) => noteGroup(n) === key);
     if (!group.length) return "";
-    return groupHead(key, `${group.length} note${group.length === 1 ? "" : "s"}`) + group.map((n) => noteRow(n, dim)).join("");
+    const right = `${group.length} note${group.length === 1 ? "" : "s"}`;
+    if (!fold) return groupHead(key, right) + group.map((n) => noteRow(n)).join("");
+    return foldHead("notes", key, right) + (isOpen("notes", key) ? group.map((n) => noteRow(n, true)).join("") : "");
   }).join("");
   const rows = grouped(Store.notes().filter(today));
-  const earlier = Store.notes().filter((n) => !today(n));
+  const season = seasonOf(nowIso());
+  const seasonNotes = Store.notes().filter((n) => seasonOf(n.created_at) === season && !today(n));
+  const delivered = seasonNotes.flatMap((n) => n.pallets);
   return `
     <div class="bg-white rounded-2xl shadow p-4">
       <button type="button" data-addnote class="w-full boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-file-lines"></i> New delivery note</button>
@@ -85,14 +92,12 @@ function notesView() {
       </div>
       ${rows || `<div class="text-center text-slate-400 text-sm py-6 border-t">No delivery notes yet today</div>`}
     </div>
-    ${earlier.length ? `
+    ${seasonNotes.length ? `
     <div class="bg-white rounded-2xl shadow px-4 pb-1">
-      <div class="${LIST_HEAD}">
-        <div class="text-lg font-bold">Earlier delivery notes</div>
-        <div class="text-base"><b>${earlier.length}</b> note${earlier.length === 1 ? "" : "s"}</div>
-        <div class="text-xs text-white/80">Tap a note to edit, print, share or delete it.</div>
-      </div>
-      ${grouped(earlier, true)}
+      ${seasonHead(`Deliveries this season (${season})`,
+        `<b>${seasonNotes.length}</b> note${seasonNotes.length === 1 ? "" : "s"} · ${noteTotals(delivered)}`,
+        "Tap a market to show or hide its notes, a note to edit, print, share or delete it.")}
+      ${grouped(seasonNotes, true)}
     </div>` : ""}`;
 }
 
@@ -391,6 +396,7 @@ function onDeliveryClick(ev) {
   if (!t) return;
   const d = dn.draft;
   if (t.dataset.note) { dn.from = null; openNote(Store.notes().find((n) => n.uuid === t.dataset.note)); }
+  else if (t.dataset.fold) toggleFold(t.dataset.fold, renderDeliveryNote);
   else if ("addnote" in t.dataset) { dn.from = null; openNote(null); }
   else if ("back" in t.dataset) leaveNote();
   else if (t.dataset.pick) {
