@@ -153,8 +153,8 @@ const groupHead = (key, right, dim) => `
       <div class="text-sm font-semibold text-right">${right}</div>
     </div>`;
 
-// A heading that folds its group away (Pallets this season, Earlier delivery
-// notes): the same band, the whole of it a button, with a chevron on the
+// A heading that folds its group away (Pallets this season, Deliveries this
+// season): the same band, the whole of it a button, with a chevron on the
 // right. Folded is the default, because these lists only grow through the
 // season and the phone is mostly used for today's. Which are open is kept
 // in memory only, so the app opens with them folded again.

@@ -91,7 +91,7 @@ function notesView() {
     ${earlier.length ? `
     <div class="bg-white rounded-2xl shadow px-4 pb-1">
       <div class="${LIST_HEAD}">
-        <div class="text-lg font-bold">Earlier delivery notes</div>
+        <div class="text-lg font-bold">Deliveries this season</div>
         <div class="text-base"><b>${earlier.length}</b> note${earlier.length === 1 ? "" : "s"}</div>
         <div class="text-xs text-white/80">Tap a market to show or hide its notes, a note to edit, print, share or delete it.</div>
       </div>
