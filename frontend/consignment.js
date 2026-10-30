@@ -87,11 +87,12 @@ function freedBy(uuid) {
 }
 const freedTag = (note) => `<div class="text-sm font-semibold text-amber-800 mt-1"><i class="fa-solid fa-rotate-left"></i> Delivery note ${esc(noteLabel(note))} was deleted: free for another delivery</div>`;
 
-// Every pallet packed this season (that this phone holds: 90 days), each
-// opening to edit like today's; one a deleted delivery note freed stands out.
+// Every pallet packed this season before today (that this phone holds: 90
+// days); today's are only in Pallets added today, so none shows twice. Each
+// opens to edit like today's; one a deleted delivery note freed stands out.
 function seasonView() {
   const season = seasonOf(nowIso());
-  const pallets = newestFirst().filter((p) => seasonOf(p.scanned_at) === season);
+  const pallets = newestFirst().filter((p) => seasonOf(p.scanned_at) === season && !(sameDay(p.scanned_at) || p.error));
   if (!pallets.length) return "";
   const rows = MARKET_GROUPS.map(([key]) => {
     const group = pallets.filter((p) => marketGroup(p.market_name) === key);

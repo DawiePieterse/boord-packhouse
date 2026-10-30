@@ -62,9 +62,9 @@ function renderDeliveryNote() {
 }
 
 // Today's notes (made on this phone's day, and any refused one whatever its
-// day, so it is never lost), then every note of the season (calendar year)
-// this phone holds, today's too, as Pallets this season lists today's
-// pallets; the ones before today greyed, still tapped to edit or delete.
+// day, so it is never lost), then every earlier note of the season (calendar
+// year) this phone holds, greyed, still tapped to edit or delete; today's are
+// only in the first list, as on Pallet Stack, so none shows twice.
 // Each under a heading per market group (USA, EU, Local), newest first
 // within it, with its market. The season's groups are folded until opened
 // (foldHead, consignment.js).
@@ -75,11 +75,11 @@ function notesView() {
     if (!group.length) return "";
     const right = `${group.length} note${group.length === 1 ? "" : "s"}`;
     if (!fold) return groupHead(key, right) + group.map((n) => noteRow(n)).join("");
-    return foldHead("notes", key, right) + (isOpen("notes", key) ? group.map((n) => noteRow(n, !today(n))).join("") : "");
+    return foldHead("notes", key, right) + (isOpen("notes", key) ? group.map((n) => noteRow(n, true)).join("") : "");
   }).join("");
   const rows = grouped(Store.notes().filter(today));
   const season = seasonOf(nowIso());
-  const seasonNotes = Store.notes().filter((n) => seasonOf(n.created_at) === season);
+  const seasonNotes = Store.notes().filter((n) => seasonOf(n.created_at) === season && !today(n));
   const delivered = seasonNotes.flatMap((n) => n.pallets);
   return `
     <div class="bg-white rounded-2xl shadow p-4">
