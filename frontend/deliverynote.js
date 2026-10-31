@@ -251,11 +251,58 @@ function noteForm() {
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
       <div id="noteMsg" class="text-sm text-red-600 empty:hidden">${d.note && d.note.error ? `Not saved: ${esc(d.note.error)}.` : ""}</div>
       <button type="button" data-savenote class="w-full boord-btn-primary rounded-xl py-4 text-lg font-bold">Save delivery note</button>
-      ${d.note ? `${!isExport(noteGroup(d.note)) /* local and juice: the Bekfontein delivery note; export: the market's spreadsheet instead */
-                    ? `<button type="button" data-pdf class="w-full border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid fa-share-from-square"></i> Print or share</button>`
-                    : exportButtons(d.note)}
-                  <button type="button" data-removenote class="w-full border border-red-300 text-red-700 rounded-xl py-3 font-semibold">Delete delivery note</button>` : ""}
+      ${printButtons(d, picked, pickedBins)}
+      ${d.note ? `<button type="button" data-removenote class="w-full border border-red-300 text-red-700 rounded-xl py-3 font-semibold">Delete delivery note</button>` : ""}
     </div>`;
+}
+
+// The print and export buttons, greyed out until the server holds the note.
+// The server draws the PDF and the market's papers from its own copy, so a
+// note that has not reached it yet has nothing to print: a new note until it
+// is saved, a saved one until the outbox has sent it (a phone in the cold
+// store can hold a note for a while). The buttons stay on the screen rather
+// than hiding, so the operator sees that printing comes after saving, with
+// the reason under them. Which buttons show follows the pallets ticked: a
+// local or juice note prints the Bekfontein delivery note, an export note
+// its market's documents (exportButtons); a saved note goes by its saved
+// copy, which is what prints. refreshNotePrint turns them on when the sync
+// lands while the note is open, without redrawing the form.
+function printButtons(d, picked, pickedBins) {
+  const note = d.note || { pallets: picked, bins: pickedBins };
+  const saved = noteSaved(d);
+  const dis = saved ? "" : "disabled";
+  const buttons = !isExport(noteGroup(note))
+    ? `<button type="button" data-pdf ${dis} class="${PRINT_BTN}"><i class="fa-solid fa-share-from-square"></i> Print or share</button>`
+    : exportButtons(note, saved);
+  return `<div id="notePrint" class="space-y-3">${buttons}
+      <div id="printHint" class="text-xs text-slate-500 text-center empty:hidden">${esc(saved ? "" : printWait(d))}</div></div>`;
+}
+const PRINT_BTN = "w-full border border-slate-300 rounded-xl py-3 font-semibold disabled:opacity-40";
+
+// Saved means the server has this note: it is in the list and not still in
+// the outbox (synced 0) or refused (error). A server row carries no synced
+// flag at all, so only this phone's unsent copy reads 0.
+function noteSaved(d) {
+  const n = d.note && Store.notes().find((x) => x.uuid === d.uuid);
+  return !!(n && n.synced !== 0 && !n.error);
+}
+
+// Why printing waits, under the greyed buttons.
+function printWait(d) {
+  const n = d.note && Store.notes().find((x) => x.uuid === d.uuid);
+  if (!n || n.error) return "Save the delivery note first - it can be printed or shared once saved.";
+  return "Sending the note to the server - print or share once the pill says synced.";
+}
+
+// A sync landing while a note is open: turn the print buttons on if the
+// server now has the note. Only the buttons change - redrawing the form
+// would wipe what is being typed.
+function refreshNotePrint() {
+  const d = dn.draft;
+  if (!d || dn.view !== "note" || !$("notePrint")) return;
+  const saved = noteSaved(d);
+  document.querySelectorAll("#notePrint button").forEach((b) => { b.disabled = !saved; });
+  $("printHint").textContent = saved ? "" : printWait(d);
 }
 
 // The seal's barcode, scanned like a pallet label (consignment.js). A browser
@@ -363,20 +410,22 @@ function noteLabel(n) {
 // consignment and PPECB sheet; EU: the same but no phyto), drawn as the
 // farm's forms, in place of the Bekfontein delivery note a local note
 // prints. The market is read off the pallets' market names (USA Sea
-// Freight, EU Air Freight). As Excel, or as one PDF of every sheet.
-function exportButtons(note) {
+// Freight, EU Air Freight). As Excel, or as one PDF of every sheet. Greyed
+// out (disabled) until the server has the note: see printButtons.
+function exportButtons(note, saved) {
   const markets = (note.pallets || []).map((p) => p.market_name || "");
   return EXPORT_MARKETS.filter(([, , re]) => markets.some((m) => re.test(m))).map(([key, label]) =>
     [["xlsx", "fa-file-excel", "Excel"], ["pdf", "fa-file-pdf", "PDF"]].map(([ext, icon, kind]) =>
-      `<button type="button" data-export="${key}_forms.${ext}" class="w-full border border-slate-300 rounded-xl py-3 font-semibold"><i class="fa-solid ${icon}"></i> Print or share ${label} documents (${kind})</button>`).join("")).join("");
+      `<button type="button" data-export="${key}_forms.${ext}" ${saved ? "" : "disabled"} class="${PRINT_BTN}"><i class="fa-solid ${icon}"></i> Print or share ${label} documents (${kind})</button>`).join("")).join("");
 }
 
 // The server makes the PDF, so the note must have reached it: a copy still
-// in the outbox would print as it was before.
+// in the outbox would print as it was before. The buttons are greyed out
+// until then (printButtons); this check is the backstop behind them.
 async function shareNote(papers) {
   const n = Store.notes().find((x) => x.uuid === dn.draft.uuid);
   const msg = $("noteMsg");
-  if (!n || n.synced === 0) { msg.textContent = "Still sending this note - try again when the pill says synced."; Store.syncNow(); return; }
+  if (!noteSaved(dn.draft)) { msg.textContent = n ? "Still sending this note - try again when the pill says synced." : "Save the delivery note first."; Store.syncNow(); return; }
   msg.textContent = "";
   try {
     // papers: an export market's papers ("usa_forms.xlsx", "eu_forms.pdf"), else the note's PDF.
@@ -539,7 +588,11 @@ function initDeliveryNote() {
   body.addEventListener("change", onDeliveryInput);
   $("deliverySettings").addEventListener("submit", saveDeliverySetting);
   $("deliverySettings").addEventListener("click", deleteDeliverySetting);
-  // A sync landing while a note is being filled in must not wipe the form.
-  Store.onChange(() => { if (!$("deliverynote").classList.contains("hidden") && dn.view !== "note") renderDeliveryNote(); });
+  // A sync landing while a note is being filled in must not wipe the form:
+  // only its print buttons follow the sync (refreshNotePrint).
+  Store.onChange(() => {
+    if ($("deliverynote").classList.contains("hidden")) return;
+    if (dn.view === "note") refreshNotePrint(); else renderDeliveryNote();
+  });
   setInterval(() => { if (!$("deliverynote").classList.contains("hidden") && !Operator.current()) show(); }, 30000);
 }
