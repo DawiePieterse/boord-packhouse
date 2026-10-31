@@ -391,16 +391,18 @@ async function saveBath(ev) {
   const isNew = form.dataset.bathForm === "new";
   const body = { name: f.get("name"), active: isNew ? true : f.get("active") === "on" };
   for (const [key] of BATH_FIELDS) body[key] = Number(f.get(key));
-  try {
-    await Boord.api(isNew ? "/api/settings/baths" : `/api/settings/baths/${form.dataset.bathForm}`,
-      { method: isNew ? "POST" : "PUT", body });
-    Boord.toast(isNew ? "Bath added" : "Bath saved");
-    await loadBathSettings();
-    Store.syncNow(); // the acid screen picks the change up
-  } catch (e) {
-    if (e.status === 401) { unlocked = false; show(); return; }
-    Boord.toast(Boord.errorDetail(e, "No connection to the server"));
-  }
+  await submitting(form, async () => { // app.js: no second Add while this one is out
+    try {
+      await Boord.api(isNew ? "/api/settings/baths" : `/api/settings/baths/${form.dataset.bathForm}`,
+        { method: isNew ? "POST" : "PUT", body });
+      Boord.toast(isNew ? "Bath added" : "Bath saved");
+      await loadBathSettings();
+      Store.syncNow(); // the acid screen picks the change up
+    } catch (e) {
+      if (e.status === 401) { unlocked = false; show(); return; }
+      Boord.toast(Boord.errorDetail(e, "No connection to the server"));
+    }
+  });
 }
 
 function initAcid() {

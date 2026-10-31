@@ -86,6 +86,33 @@ try {
     Write-Step "Checking for Git..."
     if (Get-Command git -ErrorAction SilentlyContinue) {
         Write-Ok "Found Git"
+        # The server runs as SYSTEM, and this folder belongs to the admin
+        # account that cloned it. Git refuses to read a repository owned by
+        # another account ("dubious ownership"), so /api/version answered
+        # "tag": null and Boord Monitor showed no release for this app. A
+        # machine-wide safe.directory entry lets SYSTEM's Git read it. The
+        # same block is in Boord Monitor's, Owner's and Notes' installers -
+        # keep them in step. Forward slashes: that is how Git spells a
+        # Windows path in its config, and how the entry is matched.
+        # Not fatal: the tag is information, never up/down.
+        try {
+            $safeDir = $RepoRoot.TrimEnd('\') -replace '\\', '/'
+            $trusted = @(& git config --system --get-all safe.directory) | ForEach-Object { $_.Trim() }
+            if ($trusted -contains $safeDir -or $trusted -contains "*") {
+                Write-Ok "Git already trusts $safeDir for SYSTEM"
+            } else {
+                & git config --system --add safe.directory $safeDir
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Ok "Git now trusts $safeDir for SYSTEM (safe.directory)"
+                } else {
+                    Write-Warn "Could not add $safeDir to Git's safe.directory. The server runs,"
+                    Write-Warn "but its version shows no tag. Fix by hand, as administrator:"
+                    Write-Warn "    git config --system --add safe.directory $safeDir"
+                }
+            }
+        } catch {
+            Write-Warn "Could not check Git's safe.directory: $_"
+        }
     } else {
         Write-Warn "Git is not installed. The server will still run, but update_packhouse_server.bat"
         Write-Warn "cannot fetch updates without it. Get it from https://git-scm.com/download/win"

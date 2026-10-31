@@ -53,9 +53,13 @@ const IDB = (() => {
     },
     async prune() {
       const cutoff = new Date(Date.now() - PRUNE_AFTER_DAYS * 864e5).toISOString();
-      // A refused pallet, consignment or note is kept until it is fixed: it is shown.
-      const kept = (r) => r.error && ["pallet", "consignment", "delivery_note"].includes(r.kind);
-      const stale = (await this.all()).filter((r) => r.synced && !kept(r) && (r.started_at || r.changed_at || r.checked_at || r.scanned_at || r.created_at) < cutoff);
+      // A refused pallet, consignment, juice bin or note is kept until it is fixed: it is shown.
+      const kept = (r) => r.error && ["pallet", "consignment", "juice_bin", "delivery_note"].includes(r.kind);
+      // Each kind's own date (a juice bin's is weighed_at): a kind missing here
+      // is never pruned, and its synced copies then outlive the server's 90-day
+      // list - an empty bin never filled stayed "waiting for the full weight" on
+      // the phone for good.
+      const stale = (await this.all()).filter((r) => r.synced && !kept(r) && (r.started_at || r.changed_at || r.checked_at || r.scanned_at || r.weighed_at || r.created_at) < cutoff);
       await run("readwrite", (s) => stale.forEach((r) => s.delete(r.uuid)));
     },
   };
