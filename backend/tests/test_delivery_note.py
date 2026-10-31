@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tests.test_consignment import cons, pallet
+from tests.test_consignment import LINE, cons, pallet
 from tests.test_consignment import sync as sync_pallets
 
 NOW = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -243,3 +243,16 @@ def test_a_receivers_address_prints_between_its_market_and_city(client, admin_cl
     from db import get_packhouse_session
     s = next(client.app.dependency_overrides.get(get_packhouse_session, get_packhouse_session)())
     assert _live("n1", s).receiver == "ToroFruit\nJoburg Mark\nStand 5\nJohannesburg"
+
+
+def test_special_characters_print_rather_than_500(client, pallets):
+    """fpdf2's built-in fonts are latin-1: an Afrikaans name is fine, and a
+    character outside latin-1 (a euro sign, an emoji) must be replaced, never
+    a 500 on the phone's Print or share."""
+    sync_pallets(client, pallets=[pallet("p3", barcode="B3", market_id=5, market_name="Local", supplier_name="Boërdery €",
+                                         lines=[{**LINE, "packaging_name": "Pre-pac ☃", "block_id": "15", "block_name": "Blok ë", "variety": "Maüritius"}])])
+    sync(client, note(pallets=("p3",), receiver="Boëretrust €\nTshwāne", transporter="Go Frësh ☃", seal_no="S€"),
+         note("n2", 1336, pallets=("p1", "p2"), receiver="Früit ☃", target_receiver="Tärget ☃\nAddr €"))
+    assert client.get("/api/deliverynote/n1/pdf").status_code == 200
+    assert client.get("/api/deliverynote/n2/usa_forms.pdf").status_code == 200
+    assert client.get("/api/deliverynote/n2/usa_forms.xlsx").status_code == 200

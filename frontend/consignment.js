@@ -527,15 +527,17 @@ async function saveConsignmentSetting(ev) {
   const isNew = form.dataset.id === "new";
   const body = { name: f.get("name"), active: isNew ? true : f.get("active") === "on" };
   if (kind === "packaging") body.carton_kg = Number(f.get("carton_kg"));
-  try {
-    await Boord.api(`/api/settings/${kind}${isNew ? "" : `/${form.dataset.id}`}`, { method: isNew ? "POST" : "PUT", body });
-    Boord.toast(isNew ? "Added" : "Saved");
-    await loadConsignmentSettings();
-    Store.syncNow(); // the phones pick the change up
-  } catch (e) {
-    if (e.status === 401) { unlocked = false; show(); return; }
-    Boord.toast(Boord.errorDetail(e, "No connection to the server"));
-  }
+  await submitting(form, async () => { // app.js: no second Add while this one is out
+    try {
+      await Boord.api(`/api/settings/${kind}${isNew ? "" : `/${form.dataset.id}`}`, { method: isNew ? "POST" : "PUT", body });
+      Boord.toast(isNew ? "Added" : "Saved");
+      await loadConsignmentSettings();
+      Store.syncNow(); // the phones pick the change up
+    } catch (e) {
+      if (e.status === 401) { unlocked = false; show(); return; }
+      Boord.toast(Boord.errorDetail(e, "No connection to the server"));
+    }
+  });
 }
 
 async function deleteConsignmentSetting(ev) {

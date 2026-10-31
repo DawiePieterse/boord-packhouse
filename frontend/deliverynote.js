@@ -489,16 +489,20 @@ async function loadDeliverySettings() {
   }
 }
 
-async function dnSettingsCall(path, opts, done) {
-  try {
-    await Boord.api(path, opts);
-    Boord.toast(done);
-    await loadDeliverySettings();
-    Store.syncNow(); // the phones pick the change up
-  } catch (e) {
-    if (e.status === 401) { unlocked = false; show(); return; }
-    Boord.toast(Boord.errorDetail(e, "No connection to the server"));
-  }
+// form: the one whose buttons wait for the answer (submitting, app.js), so a
+// second tap on Add can't make a second transporter or receiver.
+async function dnSettingsCall(path, opts, done, form = null) {
+  await submitting(form, async () => {
+    try {
+      await Boord.api(path, opts);
+      Boord.toast(done);
+      await loadDeliverySettings();
+      Store.syncNow(); // the phones pick the change up
+    } catch (e) {
+      if (e.status === 401) { unlocked = false; show(); return; }
+      Boord.toast(Boord.errorDetail(e, "No connection to the server"));
+    }
+  });
 }
 
 function saveDeliverySetting(ev) {
@@ -506,7 +510,7 @@ function saveDeliverySetting(ev) {
   if (ev.target.id === "dnSettingsForm") {
     const last = $("dnLastNo").value.trim();
     dnSettingsCall("/api/settings/deliverynote", { method: "PUT", body: { cooled_to: Number($("dnCooledTo").value),
-                                                                          last_no: last ? Number(last) : null } }, "Saved");
+                                                                          last_no: last ? Number(last) : null } }, "Saved", ev.target);
     return;
   }
   const form = ev.target.closest("[data-dn-form]");
@@ -517,7 +521,7 @@ function saveDeliverySetting(ev) {
   const body = { name: f.get("name"), active: isNew ? true : f.get("active") === "on" };
   if (kind === "receivers") Object.assign(body, { market: f.get("market"), address_1: f.get("address_1"), address_2: f.get("address_2"), city: f.get("city") });
   if (kind === "targetreceivers") Object.assign(body, { market: f.get("market"), address: f.get("address") });
-  dnSettingsCall(`/api/settings/${kind}${isNew ? "" : `/${form.dataset.id}`}`, { method: isNew ? "POST" : "PUT", body }, isNew ? "Added" : "Saved");
+  dnSettingsCall(`/api/settings/${kind}${isNew ? "" : `/${form.dataset.id}`}`, { method: isNew ? "POST" : "PUT", body }, isNew ? "Added" : "Saved", form);
 }
 
 function deleteDeliverySetting(ev) {

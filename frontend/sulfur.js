@@ -591,16 +591,18 @@ async function saveTent(ev) {
     active: form.dataset.tentForm === "new" ? true : f.get("active") === "on",
   };
   const isNew = form.dataset.tentForm === "new";
-  try {
-    await Boord.api(isNew ? "/api/settings/tents" : `/api/settings/tents/${form.dataset.tentForm}`,
-      { method: isNew ? "POST" : "PUT", body });
-    Boord.toast(isNew ? "Tent added" : "Tent saved");
-    await loadTentSettings();
-    Store.syncNow(); // the sulfur screen picks the change up
-  } catch (e) {
-    if (e.status === 401) { unlocked = false; show(); return; }
-    Boord.toast(Boord.errorDetail(e, "No connection to the server"));
-  }
+  await submitting(form, async () => { // app.js: no second Add while this one is out
+    try {
+      await Boord.api(isNew ? "/api/settings/tents" : `/api/settings/tents/${form.dataset.tentForm}`,
+        { method: isNew ? "POST" : "PUT", body });
+      Boord.toast(isNew ? "Tent added" : "Tent saved");
+      await loadTentSettings();
+      Store.syncNow(); // the sulfur screen picks the change up
+    } catch (e) {
+      if (e.status === 401) { unlocked = false; show(); return; }
+      Boord.toast(Boord.errorDetail(e, "No connection to the server"));
+    }
+  });
 }
 
 // --------------------------------------------------------------------------

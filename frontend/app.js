@@ -116,16 +116,34 @@ function touchSettings() {
   idleTimer = setTimeout(() => { if (location.hash.startsWith("#settings")) location.hash = ""; }, SETTINGS_IDLE_MS);
 }
 
+// A settings form's buttons are disabled while its request is out. Over the
+// tailnet an answer can take a second or two, and a second tap on Add before
+// it came back made two tents (or two cartons, two receivers) - each a POST
+// of its own. The form is usually redrawn when the request succeeds, so the
+// buttons re-enabled here are mostly the old ones; on an error they are the
+// ones still on the screen.
+async function submitting(form, work) {
+  const buttons = form ? [...form.querySelectorAll("button")].filter((b) => !b.disabled) : [];
+  buttons.forEach((b) => { b.disabled = true; });
+  try {
+    await work();
+  } finally {
+    buttons.forEach((b) => { b.disabled = false; });
+  }
+}
+
 async function changePin(ev) {
   ev.preventDefault();
-  try {
-    await Boord.api("/api/admin/pin", { method: "POST", body: { current: $("pinCurrent").value, new: $("pinNew").value } });
-    $("pinCurrent").value = $("pinNew").value = "";
-    Boord.toast("PIN changed - other tablets need the new one");
-  } catch (e) {
-    if (e.status === 401) { unlocked = false; show(); return; }
-    Boord.toast(Boord.errorDetail(e, "No connection to the server"));
-  }
+  await submitting(ev.target, async () => {
+    try {
+      await Boord.api("/api/admin/pin", { method: "POST", body: { current: $("pinCurrent").value, new: $("pinNew").value } });
+      $("pinCurrent").value = $("pinNew").value = "";
+      Boord.toast("PIN changed - other tablets need the new one");
+    } catch (e) {
+      if (e.status === 401) { unlocked = false; show(); return; }
+      Boord.toast(Boord.errorDetail(e, "No connection to the server"));
+    }
+  });
 }
 
 // Backups card in Settings - Boord Admin's, trimmed (backend/backup.py).
