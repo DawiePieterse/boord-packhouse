@@ -135,7 +135,8 @@ def _put(ws, ref, value=None, kind="value", box=True, rotate=0, top=False):
     first = cells[0]
     first.value = value
     first.font = font
-    first.alignment = Alignment(horizontal=across, vertical="top" if top else "center", wrap_text=True,
+    # Turned text is not wrapped: LibreOffice drops the turn of a wrapped cell.
+    first.alignment = Alignment(horizontal=across, vertical="top" if top else "center", wrap_text=not rotate,
                                 text_rotation=rotate, indent=1 if across == "left" else 0)
 
 
