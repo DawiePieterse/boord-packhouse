@@ -378,7 +378,31 @@ def _workbook(n, target: str, market: str) -> Workbook:
         _phyto(wb, f)
     _consignment(wb, f)
     _inspection(wb, f)
+    for ws in wb.worksheets:
+        _fit(ws)
     return wb
+
+
+def _fit(ws):
+    """Widen a block's last column until each of its lines fits on one line, so
+    nothing is cut off in a row of fixed height; the page is fitted to the A4
+    width, so a wider sheet only prints a little smaller. Titles, hints (no box),
+    tick-box rows and turned headings keep the widths they were drawn with."""
+    pdf = FPDF(unit="pt")
+    blocks = {(m.min_row, m.min_col): (m.min_col, m.max_col) for m in ws.merged_cells.ranges}
+    for row in ws.iter_rows():
+        for c in row:
+            if (not isinstance(c.value, (str, int, float)) or not c.border.left.style
+                    or c.alignment.text_rotation):
+                continue
+            _font(pdf, c.font, 1)
+            text = max((pdf.get_string_width(line) for line in _latin(c.value).split("\n")), default=0)
+            need = 1.1 * (text / 0.75 - 5) / 7 + (2 if c.alignment.indent else 1)  # Excel's width units, a tenth spare
+            first, last = blocks.get((c.row, c.column), (c.column, c.column))
+            dims = [ws.column_dimensions[chr(64 + i)] for i in range(first, last + 1)]
+            have = sum(d.width or 8.43 for d in dims)
+            if need > have:
+                dims[-1].width = round((dims[-1].width or 8.43) + need - have, 1)
 
 
 def forms(n, target: str = "", market: str = "USA") -> bytes:
