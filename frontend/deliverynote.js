@@ -432,8 +432,17 @@ async function shareNote(papers) {
     const blob = await Boord.api(`/api/deliverynote/${encodeURIComponent(n.uuid)}/${papers || "pdf"}`);
     const name = papers ? papers.replace(".", `_${noteLabel(n)}.`) : `afleweringsnota_${noteLabel(n)}.pdf`;
     const file = new File([blob], name, { type: blob.type });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: `Delivery note ${noteLabel(n)}` });
-    else Boord.downloadBlob(blob, name);
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: `Delivery note ${noteLabel(n)}` });
+      else Boord.downloadBlob(blob, name);
+    } catch (e) {
+      // canShare only says a file is there: Android Chrome then refuses a type
+      // it won't share (.xlsx), or a share too long after the tap (slow
+      // Wi-Fi), with NotAllowedError "Permission denied". Download it instead.
+      if (e.name !== "NotAllowedError") throw e;
+      Boord.downloadBlob(blob, name);
+      msg.textContent = "Saved to Downloads - open it there to print or share it.";
+    }
   } catch (e) {
     if (e.name === "AbortError") return; // closed the share sheet
     msg.textContent = Boord.errorDetail(e, "No connection to the server - printing needs it.");
