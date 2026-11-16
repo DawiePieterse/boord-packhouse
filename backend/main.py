@@ -16,12 +16,21 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 import config
+import tunnel_gate
 from backup import start_backup_scheduler
 from boord import BOORD_SCHEMA_CHECK
 from db import boord_engine, init_packhouse_db
 from routers import acid, admin, backups, baths, consignment, consignment_settings, delivery_note, delivery_settings, floor, juice, sulfur, sulfur_report, tents, version, weather
 
 app = FastAPI(title="Boord Packhouse")
+
+# Who may reach this app through the Cloudflare Tunnel (tunnel_gate.py): the
+# paired-device roles it admits there. Tailscale is not asked anything.
+# The floor tablets are field devices and the office is the admin; both
+# reach this app, as does the owner. Settings is still the settings PIN's job (admin_auth.py),
+# exactly as it is over Tailscale.
+TUNNEL_ROLES = ("admin", "owner", "field")
+tunnel_gate.install(app, TUNNEL_ROLES)
 
 for module in (acid, admin, backups, baths, consignment, consignment_settings, delivery_note, delivery_settings, floor, juice, sulfur, sulfur_report, tents, version, weather):
     app.include_router(module.router)
