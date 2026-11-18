@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends
 from sqlmodel import Session, SQLModel, func, select
 
 from db import get_packhouse_session
+from export_forms import pallet_code
 from models import Consignment, Market, Pallet
 from routers.sulfur import _iso, _now, _utc_naive
 from timeutil import to_local
@@ -76,7 +77,7 @@ def _pallet_problem(rec: PalletIn, session: Session) -> Optional[str]:
         return "bad uuid"
     if session.get(Consignment, rec.consignment_uuid) is None:
         return "unknown consignment"
-    barcode = rec.barcode.strip()
+    barcode = pallet_code(rec.barcode)
     if not rec.removed:
         if not barcode:
             return "a pallet needs its scanned barcode"
@@ -140,7 +141,7 @@ def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
             row = Pallet(uuid=rec.uuid, consignment_uuid=rec.consignment_uuid, scanned_at=scanned, device=body.device,
                          synced_at=now, barcode="", pallet_year=year, pallet_no=_next_number(session, year),
                          scanned_by=rec.scanned_by, scanned_by_name=rec.scanned_by_name)
-        row.barcode, row.removed = rec.barcode.strip(), rec.removed
+        row.barcode, row.removed = pallet_code(rec.barcode), rec.removed
         row.changed_by, row.changed_by_name = rec.changed_by, rec.changed_by_name
         if not rec.removed:
             row.lines, row.pallet_ref = json.dumps(rec.lines), rec.pallet_ref

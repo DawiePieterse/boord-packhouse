@@ -425,7 +425,7 @@ def _draw(n: DeliveryNote, pages: int):
             if barcode:
                 pdf.set_xy(right, y + 6.5)
                 pdf.set_text_color(90, 90, 90)
-                text(8, f"Barcode {p['barcode']}", h=4.5, w=inner)
+                text(8, f"Barcode {export_forms.pallet_code(p['barcode'])}", h=4.5, w=inner)
                 pdf.set_text_color(0, 0, 0)
             for j, ln in enumerate(p["lines"]):
                 pdf.set_xy(right + 2, y + 6.5 + barcode + j * 4.5)
