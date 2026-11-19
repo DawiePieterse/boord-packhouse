@@ -247,7 +247,9 @@ def _kg(v: float) -> str:
 def _line_text(ln: dict) -> str:
     """A pallet line as Pallet Stack shows it: 80 x 1kg XXL, Block 7, Mauritius, Litchis."""
     block = f", {ln.get('block_name')}{', ' + ln['variety'] if ln.get('variety') else ''}" if ln.get("block_id") else ""
-    return f"{ln['cartons']} x {ln['packaging_name']}{block}, Litchis"
+    size = ln.get("size") or ""
+    pack = f"{ln['packaging_name']} {size}" if size and size not in ln["packaging_name"].split() else ln["packaging_name"]
+    return f"{ln['cartons']} x {pack}{block}, Litchis"
 
 
 def _cartons(p: dict) -> int:

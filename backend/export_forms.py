@@ -81,11 +81,14 @@ def _num(v):
 
 def export_rows(pallets: list) -> list:
     rows = []
-    for k, p in enumerate(pallets):
+    # Lowest pallet number first, as the department's forms run.
+    order = sorted(range(len(pallets)), key=lambda k: (str(pallets[k].get("pallet_ref") or "").zfill(6), k))
+    for k in order:
+        p = pallets[k]
         for ln in p["lines"]:
             rows.append({"pallet": k, "pallet_no": p["pallet_ref"], "pallet_id": pallet_code(p["barcode"]),
                          "variety": ln.get("variety") or "", "block": (ln.get("block_name") or "").replace("Block ", ""),
-                         "cartons": ln["cartons"], "date_code": p["date_code"], "count": _count(ln["packaging_name"]),
+                         "cartons": ln["cartons"], "date_code": p["date_code"], "count": ln.get("size") or _count(ln["packaging_name"]),
                          "pack": ln["packaging_name"]})
     return rows
 
@@ -159,7 +162,7 @@ def _cell(ref: str, attrs: str, value) -> str:
         value = value.date()
     if isinstance(value, date):
         value = (value - EPOCH).days
-    if value is None:
+    if value is None or value == "":
         return f'<c r="{ref}"{s}/>'
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return f'<c r="{ref}"{s}><v>{value}</v></c>'

@@ -286,3 +286,29 @@ def test_special_characters_print_rather_than_500(client, pallets):
          note("n2", 1336, pallets=("p1", "p2"), receiver="Früit ☃", target_receiver="Tärget ☃\nAddr €"))
     assert client.get("/api/deliverynote/n1/pdf").status_code == 200
     assert client.get("/api/deliverynote/n2/usa_forms.xlsx").status_code == 200
+
+
+def test_the_forms_run_by_pallet_number_and_count_is_the_lines_size():
+    import json as _json
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    import export_forms
+    from models import DeliveryNote
+    from routers.delivery_note import _line_text
+
+    def pallet_of(ref, **line):
+        return {"pallet_ref": ref, "barcode": f"B{ref}", "date_code": "7304", "market_name": "USA",
+                "lines": [{"cartons": 192, "packaging_name": "4.5kg Rhino", "carton_kg": 4.5, **line}]}
+    # Ticked newest first, as LW 2300 was: the forms still run 017, 029, 801.
+    n = DeliveryNote(uuid="x", note_no=2300, created_at=datetime.now(), loaded_on="2026-11-18", receiver="AgriLink",
+                     pallets=_json.dumps([pallet_of("801", size="XL"), pallet_of("029", size="XXL"), pallet_of("017")]))
+    wb = load_workbook(BytesIO(export_forms.forms(n)))
+    p, c = wb["Phyto (1)"], wb["Consignment 1"]
+    assert [p[f"N{r}"].value for r in (27, 28, 29)] == ["017", "029", 801]
+    assert [p[f"M{r}"].value for r in (27, 28, 29)] == [None, "XXL", "XL"]  # 017's line has no size, nor its pack name
+    assert [c[f"H{r}"].value for r in (11, 12, 13)] == [None, "XXL", "XL"]
+    assert _line_text({"cartons": 192, "packaging_name": "4.5kg Rhino", "size": "XL"}) == "192 x 4.5kg Rhino XL, Litchis"
+    assert _line_text({"cartons": 80, "packaging_name": "1kg XXL", "size": "XXL"}) == "80 x 1kg XXL, Litchis"
+

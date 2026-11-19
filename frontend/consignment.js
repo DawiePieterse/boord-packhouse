@@ -187,6 +187,9 @@ const seasonHead = (title, totals, hint) => `
         <div class="text-xs text-slate-600">${hint}</div>
       </div>`;
 
+// A line's carton type with its size (4.5kg Rhino XL), unless the name has it already.
+const lineName = (l) => (l.size && !l.packaging_name.split(/\s+/).includes(l.size) ? `${l.packaging_name} ${l.size}` : l.packaging_name);
+
 // One pallet as the list shows it: number, cartons and kg, date code, supplier,
 // market, barcode and its lines. The delivery note shows pallets the same way.
 const palletSummary = (p) => `
@@ -197,7 +200,7 @@ const palletSummary = (p) => `
       <div class="text-sm">${esc(palletDateCode(p))} · ${esc(p.supplier_name || "-")} · ${esc(p.market_name || "-")}</div>
       <div class="text-xs text-slate-500 truncate empty:hidden">${[p.barcode && `Barcode ${esc(palletCode(p.barcode))}`, p.scanned_by_name && esc(p.scanned_by_name)].filter(Boolean).join(" · ")}</div>
       <ol class="list-decimal pl-6 mt-1 text-sm">
-        ${p.lines.map((l) => `<li><b>${l.cartons}</b> x ${esc(l.packaging_name)}${l.block_id ? `, ${esc(l.block_name)}${l.variety ? `, ${esc(l.variety)}` : ""}` : ""}, Litchis</li>`).join("")}
+        ${p.lines.map((l) => `<li><b>${l.cartons}</b> x ${esc(lineName(l))}${l.block_id ? `, ${esc(l.block_name)}${l.variety ? `, ${esc(l.variety)}` : ""}` : ""}, Litchis</li>`).join("")}
       </ol>`;
 
 // ---- A pallet: scan its label, then what is on it ---------------------------
@@ -212,7 +215,7 @@ function rememberUsed(d, lines) {
   const l = lines[lines.length - 1];
   try {
     localStorage.setItem(LAST_USED, JSON.stringify({ supplier_id: d.supplier_id, market_id: d.market_id,
-                                                     packaging_id: l.packaging_id, block_id: l.block_id || "" }));
+                                                     packaging_id: l.packaging_id, block_id: l.block_id || "", size: l.size || "" }));
   } catch (_) { /* private mode */ }
 }
 // A remembered id only if it is still on offer: a retired carton or market is not picked for you.
@@ -223,16 +226,17 @@ function openPallet(pallet) {
   if (pallet) {
     cn.draft = { uuid: pallet.uuid, pallet, barcode: pallet.barcode, ref: pallet.pallet_ref || "",
                  supplier_id: pallet.supplier_id, market_id: pallet.market_id,
-                 lines: pallet.lines.map((l) => ({ packaging_id: l.packaging_id, cartons: l.cartons, block_id: l.block_id || "" })) };
+                 lines: pallet.lines.map((l) => ({ packaging_id: l.packaging_id, cartons: l.cartons, block_id: l.block_id || "", size: l.size || "" })) };
   } else {
     // The values this phone last used, else those of the newest pallet.
     const newest = newestFirst()[0] || {};
     const line = (newest.lines || []).slice(-1)[0] || {};
     const last = { supplier_id: newest.supplier_id, market_id: newest.market_id, packaging_id: line.packaging_id,
-                   block_id: line.block_id, ...lastUsed() };
+                   block_id: line.block_id, size: line.size, ...lastUsed() };
     cn.draft = { uuid: Boord.uuid(), pallet: null, barcode: "", ref: nextRef(),
                  supplier_id: stillOffered(Store.suppliers(), last.supplier_id), market_id: stillOffered(Store.markets(), last.market_id),
-                 lines: [{ packaging_id: stillOffered(Store.packaging(), last.packaging_id), cartons: "", block_id: last.block_id || "" }] };
+                 lines: [{ packaging_id: stillOffered(Store.packaging(), last.packaging_id), cartons: "", block_id: last.block_id || "",
+                          size: sizeChoices(null).includes(last.size) ? last.size : "" }] };
   }
   renderConsignment();
 }
@@ -266,6 +270,16 @@ function blockGroups(d) {
   if (earlier.length) groups.push({ label: "Earlier", blocks: earlier });
   return groups;
 }
+// The fruit sizes (the farm's list, Settings -> Sulfur's) plus any the pallet
+// already has that have since left it. The size is the export forms' Count.
+function sizeChoices(d) {
+  const s = Store.sulfurSettings();
+  let sizes = [];
+  try { sizes = s && s.sizes ? JSON.parse(s.sizes) : []; } catch (_) { /* a bad list: none */ }
+  const own = d && d.pallet ? d.pallet.lines.map((l) => l.size).filter(Boolean) : [];
+  return [...new Set([...sizes, ...own])];
+}
+
 const blockText = (b) => `${b.block_name}${b.variety ? ` · ${b.variety}` : ""}`;
 const palletDateCode = (p) => (p && p.date_code) || dateCode(new Date(p ? p.scanned_at : nowIso()));
 
@@ -280,7 +294,7 @@ function draftLines(d) {
     const prev = old.find((o) => o.packaging_id === l.packaging_id);
     return { packaging_id: pack.id, packaging_name: pack.name, carton_kg: prev ? prev.carton_kg : pack.carton_kg,
              cartons: Math.round(Number(l.cartons)), block_id: block ? block.block_id : null,
-             block_name: block ? block.block_name : "", variety: block ? block.variety || "" : "" };
+             block_name: block ? block.block_name : "", variety: block ? block.variety || "" : "", size: l.size || "" };
   });
 }
 
@@ -291,19 +305,25 @@ function palletForm() {
   const d = cn.draft;
   const packs = packChoices(d);
   const groups = blockGroups(d);
+  const sizes = sizeChoices(d);
   const field = "border border-slate-300 rounded-lg px-2 py-2.5";
-  // One row a line: Qty, Carton type, Block, delete.
+  // Two rows a line: Qty, Carton type, Size; then its Block and delete.
   const cell = "min-w-0 border border-slate-300 rounded-lg px-2 py-3";
   const lines = d.lines.map((l, i) => `
-    <div class="flex gap-1.5 items-center" data-line="${i}">
-      <span class="w-5 shrink-0 text-center text-sm text-slate-500">${i + 1}</span>
-      <input data-field="cartons" inputmode="numeric" maxlength="4" placeholder="Qty" value="${esc(l.cartons)}" class="w-12 shrink-0 ${cell}">
-      <select data-field="pack" class="flex-1 ${cell}">${options(packs, l.packaging_id, "Carton...")}</select>
-      <select data-field="lineblock" class="flex-1 ${cell}">
-        <option value="">Block...</option>
-        ${groups.map((g) => `<optgroup label="${esc(g.label)}">${g.blocks.map((b) => `<option value="${esc(b.block_id)}"${b.block_id === l.block_id ? " selected" : ""}>${esc(blockText(b))}</option>`).join("")}</optgroup>`).join("")}
-      </select>
-      <button type="button" data-drop="${i}" title="Delete this line" class="w-8 shrink-0 py-3 text-slate-400"><i class="fa-solid fa-trash-can"></i></button>
+    <div class="space-y-1.5" data-line="${i}">
+      <div class="flex gap-1.5 items-center">
+        <span class="w-5 shrink-0 text-center text-sm text-slate-500">${i + 1}</span>
+        <input data-field="cartons" inputmode="numeric" maxlength="4" placeholder="Qty" value="${esc(l.cartons)}" class="w-12 shrink-0 ${cell}">
+        <select data-field="pack" class="flex-1 ${cell}">${options(packs, l.packaging_id, "Carton...")}</select>
+        <select data-field="size" class="w-20 shrink-0 ${cell}"><option value="">Size...</option>${sizes.map((z) => `<option${z === l.size ? " selected" : ""}>${esc(z)}</option>`).join("")}</select>
+      </div>
+      <div class="flex gap-1.5 items-center pl-[1.625rem]">
+        <select data-field="lineblock" class="flex-1 ${cell}">
+          <option value="">Block...</option>
+          ${groups.map((g) => `<optgroup label="${esc(g.label)}">${g.blocks.map((b) => `<option value="${esc(b.block_id)}"${b.block_id === l.block_id ? " selected" : ""}>${esc(blockText(b))}</option>`).join("")}</optgroup>`).join("")}
+        </select>
+        <button type="button" data-drop="${i}" title="Delete this line" class="w-8 shrink-0 py-3 text-slate-400"><i class="fa-solid fa-trash-can"></i></button>
+      </div>
     </div>`).join("");
   return `
     <div class="flex items-center gap-3">
@@ -327,7 +347,7 @@ function palletForm() {
       </div>
       <div id="palletScanMsg" class="text-sm text-red-600 empty:hidden">${d.pallet && d.pallet.error ? `Not saved: ${esc(d.pallet.error)}.` : ""}</div>
       <div class="text-sm font-semibold text-slate-600">What is on the pallet</div>
-      <div class="flex gap-1.5 text-xs text-slate-500 -mb-2"><span class="w-5 shrink-0"></span><span class="w-12 shrink-0">Qty</span><span class="flex-1">Carton type</span><span class="flex-1">Block</span><span class="w-8 shrink-0"></span></div>
+      <div class="flex gap-1.5 text-xs text-slate-500 -mb-2"><span class="w-5 shrink-0"></span><span class="w-12 shrink-0">Qty</span><span class="flex-1">Carton type</span><span class="w-20 shrink-0">Size</span></div>
       ${lines}
       <button type="button" data-addline class="text-blue-700 font-semibold"><i class="fa-solid fa-plus"></i> Another line</button>
       <button type="button" data-save class="w-full boord-btn-primary rounded-xl py-4 text-lg font-bold">Save pallet</button>
@@ -458,9 +478,10 @@ function onConsignmentClick(ev) {
   else if ("cancel" in t.dataset) { cn.view = "list"; renderConsignment(); }
   else if ("scan" in t.dataset) (palletScanner ? stopPalletScan() : startPalletScan());
   else if ("addline" in t.dataset) {
-    // A new line starts with the carton type and block of the one above.
+    // A new line starts with the carton type, size and block of the one above.
     const above = d.lines[d.lines.length - 1] || {};
-    d.lines.push({ packaging_id: above.packaging_id == null ? null : above.packaging_id, cartons: "", block_id: above.block_id || "" });
+    d.lines.push({ packaging_id: above.packaging_id == null ? null : above.packaging_id, cartons: "", block_id: above.block_id || "",
+                   size: above.size || "" });
     sync();
   }
   else if (t.dataset.drop) {
@@ -469,7 +490,7 @@ function onConsignmentClick(ev) {
     // Ask first, unless no Qty was typed (a new line's carton type and block are only copied from the line above).
     if (l.cartons !== "" && !confirm(`Delete line ${i + 1}?`)) return;
     d.lines.splice(i, 1);
-    if (!d.lines.length) d.lines.push({ packaging_id: null, cartons: "", block_id: "" }); // a pallet is deleted with its own button
+    if (!d.lines.length) d.lines.push({ packaging_id: null, cartons: "", block_id: "", size: "" }); // a pallet is deleted with its own button
     sync();
   }
   else if ("save" in t.dataset) savePallet();
@@ -486,6 +507,7 @@ function onConsignmentInput(ev) {
   const line = cn.draft.lines[Number(ev.target.closest("[data-line]").dataset.line)];
   if (f === "pack") line.packaging_id = v ? Number(v) : null;
   else if (f === "lineblock") line.block_id = v;
+  else if (f === "size") line.size = v;
   // A text box, not type=number: its spinner hid the digits in a box this narrow.
   else { line.cartons = v.replace(/\D/g, ""); ev.target.value = line.cartons; }
   updatePalletTotal();
