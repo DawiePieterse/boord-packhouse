@@ -488,21 +488,27 @@ MARKETS = {"usa": "USA", "eu": "EU"}
 
 @router.get("/{uuid}/{market}_forms.xlsx")
 def note_export_forms(uuid: str, market: str, session: Session = Depends(get_packhouse_session)):
-    """The note's pallets on the market's export papers, drawn as the farm's forms,
-    with the note's own target receiver."""
+    """The note's pallets on the market's export papers: the department's own
+    workbook, filled in (export_forms.py)."""
     if market not in MARKETS:
         raise HTTPException(404, "No papers for that market")
     n = _live(uuid, session)
-    return _xlsx(export_forms.forms(n, n.target_receiver, MARKETS[market]), f"{market}_forms_{export_forms.note_label(n)}.xlsx")
+    try:
+        return _xlsx(export_forms.forms(n, MARKETS[market]), f"{market}_forms_{export_forms.note_label(n)}.xlsx")
+    except export_forms.TooManyLines as e:
+        raise HTTPException(409, str(e))
 
 
 @router.get("/{uuid}/{market}_forms.pdf")
 def note_export_forms_pdf(uuid: str, market: str, session: Session = Depends(get_packhouse_session)):
-    """The same papers as one PDF, every sheet a page (or more)."""
+    """The same papers as one PDF, a sheet a page."""
     if market not in MARKETS:
         raise HTTPException(404, "No papers for that market")
     n = _live(uuid, session)
     name = f"{market}_forms_{export_forms.note_label(n)}.pdf"
-    return Response(export_forms.forms_pdf(n, n.target_receiver, MARKETS[market]), media_type="application/pdf",
-                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+    try:
+        content = export_forms.forms_pdf(n, MARKETS[market])
+    except export_forms.TooManyLines as e:
+        raise HTTPException(409, str(e))
+    return Response(content, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
