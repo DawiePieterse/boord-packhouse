@@ -63,9 +63,15 @@ def pallet_code(code: str) -> str:
     return m.group(1) if m else c
 
 
+# A pack that only ever holds one size: a Rhino carton is always XL.
+PACK_COUNT = {"RHINO": "XL"}
+
+
 def _count(pack: str) -> str:
-    """The size count (XL) out of the pack's name (Rhino 4.5 kg XL)."""
-    return next((w for w in pack.upper().replace(",", " ").split() if w in SIZES), "")
+    """The size count (XL) out of the pack's name (Rhino 4.5 kg XL), else the
+    one size its pack always holds (4.5kg Rhino)."""
+    words = pack.upper().replace(",", " ").split()
+    return next((w for w in words if w in SIZES), None) or next((PACK_COUNT[w] for w in words if w in PACK_COUNT), "")
 
 
 def _package(pack: str) -> str:
@@ -81,7 +87,10 @@ def _num(v):
 
 def export_rows(pallets: list) -> list:
     rows = []
-    for k, p in enumerate(pallets):
+    # Lowest pallet number first, as the department's forms run.
+    order = sorted(range(len(pallets)), key=lambda k: (str(pallets[k].get("pallet_ref") or "").zfill(6), k))
+    for k in order:
+        p = pallets[k]
         for ln in p["lines"]:
             rows.append({"pallet": k, "pallet_no": p["pallet_ref"], "pallet_id": pallet_code(p["barcode"]),
                          "variety": ln.get("variety") or "", "block": (ln.get("block_name") or "").replace("Block ", ""),
@@ -159,7 +168,7 @@ def _cell(ref: str, attrs: str, value) -> str:
         value = value.date()
     if isinstance(value, date):
         value = (value - EPOCH).days
-    if value is None:
+    if value is None or value == "":
         return f'<c r="{ref}"{s}/>'
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return f'<c r="{ref}"{s}><v>{value}</v></c>'
