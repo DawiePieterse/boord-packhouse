@@ -501,7 +501,7 @@ def note_export_forms(uuid: str, market: str, session: Session = Depends(get_pac
 
 @router.get("/{uuid}/{market}_forms.pdf")
 def note_export_forms_pdf(uuid: str, market: str, session: Session = Depends(get_packhouse_session)):
-    """The same papers as one PDF, a sheet a page."""
+    """The same papers as one PDF, saved by Excel on the farm PC."""
     if market not in MARKETS:
         raise HTTPException(404, "No papers for that market")
     n = _live(uuid, session)
@@ -510,5 +510,7 @@ def note_export_forms_pdf(uuid: str, market: str, session: Session = Depends(get
         content = export_forms.forms_pdf(n, MARKETS[market])
     except export_forms.TooManyLines as e:
         raise HTTPException(409, str(e))
+    except export_forms.NoPdf as e:
+        raise HTTPException(503, str(e))
     return Response(content, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 

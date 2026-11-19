@@ -153,14 +153,34 @@ def test_usa_forms_are_the_departments_workbook_filled_in(client, pallets):
     assert client.get("/api/deliverynote/n1/usa.xlsx").status_code == 404  # no simple sheets
 
 
-def test_export_forms_also_come_as_one_pdf(client, pallets):
+def test_export_pdfs_are_excels_own_on_the_farm_pc(client, pallets, monkeypatch):
+    import subprocess
+
+    import export_forms
     sync(client, note(pallets=("p1", "p2")))
-    r = client.get("/api/deliverynote/n1/usa_forms.pdf")
-    assert r.status_code == 200 and 'usa_forms_LW-1335.pdf' in r.headers["content-disposition"]
-    assert r.content.startswith(b"%PDF") and r.content.count(b"/Type /Page\n") == 5  # a page a sheet
-    assert client.get("/api/deliverynote/n1/eu_forms.pdf").content.count(b"/Type /Page\n") == 3  # no phyto
+    r = client.get("/api/deliverynote/n1/usa_forms.pdf")  # not on Windows: no Excel to make it
+    assert r.status_code == 503 and "Excel" in r.json()["detail"]
     assert client.get("/api/deliverynote/n1/uk_forms.pdf").status_code == 404
     assert client.get("/api/deliverynote/nope/usa_forms.pdf").status_code == 404
+
+    seen = {}
+
+    def excel(cmd, env, **kw):  # stands in for PowerShell driving Excel
+        seen["xlsx"] = open(env["FORMS_IN"], "rb").read()
+        with open(env["FORMS_OUT"], "wb") as f:
+            f.write(b"%PDF from Excel")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr(export_forms.sys, "platform", "win32")
+    monkeypatch.setattr(export_forms.subprocess, "run", excel)
+    r = client.get("/api/deliverynote/n1/usa_forms.pdf")
+    assert r.status_code == 200 and r.content == b"%PDF from Excel" and 'usa_forms_LW-1335.pdf' in r.headers["content-disposition"]
+    assert seen["xlsx"] == client.get("/api/deliverynote/n1/usa_forms.xlsx").content  # the very workbook the Excel button gives
+
+    def broken(cmd, env, **kw):
+        return subprocess.CompletedProcess(cmd, 1, "", "Retrieving the COM class factory failed\nmore")
+    monkeypatch.setattr(export_forms.subprocess, "run", broken)
+    r = client.get("/api/deliverynote/n1/eu_forms.pdf")
+    assert r.status_code == 503 and "COM class factory failed" in r.json()["detail"]
 
 
 def test_the_forms_hold_21_pallet_lines_numbered_on_over_the_phyto_pages():
@@ -265,5 +285,4 @@ def test_special_characters_print_rather_than_500(client, pallets):
     sync(client, note(pallets=("p3",), receiver="Boëretrust €\nTshwāne", transporter="Go Frësh ☃", seal_no="S€"),
          note("n2", 1336, pallets=("p1", "p2"), receiver="Früit ☃", target_receiver="Tärget ☃\nAddr €"))
     assert client.get("/api/deliverynote/n1/pdf").status_code == 200
-    assert client.get("/api/deliverynote/n2/usa_forms.pdf").status_code == 200
     assert client.get("/api/deliverynote/n2/usa_forms.xlsx").status_code == 200
