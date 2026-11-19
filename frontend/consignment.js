@@ -195,7 +195,7 @@ const palletSummary = (p) => `
         <div class="text-sm shrink-0"><b>${palletCartons(p)}</b> cartons · ${kgText(palletKg(p))}</div>
       </div>
       <div class="text-sm">${esc(palletDateCode(p))} · ${esc(p.supplier_name || "-")} · ${esc(p.market_name || "-")}</div>
-      <div class="text-xs text-slate-500 truncate empty:hidden">${[p.barcode && `Barcode ${esc(p.barcode)}`, p.scanned_by_name && esc(p.scanned_by_name)].filter(Boolean).join(" · ")}</div>
+      <div class="text-xs text-slate-500 truncate empty:hidden">${[p.barcode && `Barcode ${esc(palletCode(p.barcode))}`, p.scanned_by_name && esc(p.scanned_by_name)].filter(Boolean).join(" · ")}</div>
       <ol class="list-decimal pl-6 mt-1 text-sm">
         ${p.lines.map((l) => `<li><b>${l.cartons}</b> x ${esc(l.packaging_name)}${l.block_id ? `, ${esc(l.block_name)}${l.variety ? `, ${esc(l.variety)}` : ""}` : ""}, Litchis</li>`).join("")}
       </ol>`;
@@ -369,12 +369,21 @@ function stopPalletScan() {
   if (s) try { Promise.resolve(s.stop()).then(() => s.clear()).catch(() => {}); } catch (_) { /* never started */ }
 }
 
+// A pallet label's code as it is kept (export_forms.pallet_code on the server):
+// a GS1 SSCC is just its 18 digits, without the ]C1 some scanners put in front,
+// the (00) or the bare 00. Any other code is kept as typed.
+function palletCode(text) {
+  const c = String(text || "").trim().replace(/^\][A-Za-z]\d/, "").replace(/\x1d/g, "");
+  const m = c.match(/^\(?00\)?(\d{18})$/);
+  return m ? m[1] : c;
+}
+
 // Another live pallet with this code, if any (the server checks it too).
-const palletWithCode = (code, uuid) => Store.pallets().find((p) => p.barcode === code && p.uuid !== uuid);
+const palletWithCode = (code, uuid) => Store.pallets().find((p) => palletCode(p.barcode) === code && p.uuid !== uuid);
 
 function onPalletCode(text) {
   if (!palletScanner) return; // the camera reports a code many times a second
-  const code = text.trim();
+  const code = palletCode(text);
   if (!palletConfirm(code)) return;
   const other = palletWithCode(code, cn.draft.uuid);
   if (other) {
@@ -401,7 +410,7 @@ async function currentStack() {
 async function savePallet() {
   const d = cn.draft;
   const lines = draftLines(d);
-  const barcode = d.barcode.trim();
+  const barcode = palletCode(d.barcode);
   const supplier = supplierChoices(d).find((s) => s.id === d.supplier_id);
   const market = marketChoices(d).find((m) => m.id === d.market_id);
   const fail = (m) => { $("palletScanMsg").textContent = m; };

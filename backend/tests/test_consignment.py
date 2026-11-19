@@ -160,3 +160,15 @@ def test_the_barcode_is_needed_but_an_old_pallet_without_one_can_go(client):
     assert sync(client, [cons()], [pallet("p1", barcode="  ")])["rejected"][0]["error"] == "a pallet needs its scanned barcode"
     # One saved without a barcode while it was optional (v0.39 - v0.45) can still be taken off.
     assert sync(client, pallets=[pallet("p2", barcode="", removed=True)])["synced"] == ["p2"]
+
+
+def test_a_pallet_label_is_kept_as_its_bare_sscc(client):
+    from export_forms import pallet_code
+    sscc = "060099005963005176"
+    for scanned in ("]C1" + "00" + sscc, "(00)" + sscc, "00" + sscc, sscc, " ]C1\x1d00" + sscc + " "):
+        assert pallet_code(scanned) == sscc, scanned
+    assert pallet_code("B2") == "B2" and pallet_code("]C1LOCAL7") == "LOCAL7"
+    sync(client, [cons()], [pallet("p1", barcode="]C100" + sscc)])
+    assert state(client)["pallets"][0]["barcode"] == sscc
+    out = sync(client, pallets=[pallet("p2", barcode="(00)" + sscc)])  # the same label, another scanner
+    assert out["synced"] == [] and "already on pallet" in out["rejected"][0]["error"]

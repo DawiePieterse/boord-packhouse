@@ -59,6 +59,15 @@ def note_label(n) -> str:
     return f"{'LW' if export else 'B'}-{n.note_no}"
 
 
+def pallet_code(code: str) -> str:
+    """A pallet label's code as it is kept: a GS1 SSCC is just its 18 digits,
+    without the ]C1 some scanners put in front (the GS1-128 symbology
+    identifier), the (00) or the bare 00. Any other code is kept as typed."""
+    c = re.sub(r"^\][A-Za-z]\d", "", code.strip()).replace("\x1d", "")
+    m = re.fullmatch(r"\(?00\)?(\d{18})", c)
+    return m.group(1) if m else c
+
+
 def _count(pack: str) -> str:
     """The size count (XL) out of the pack's name (Rhino 4.5 kg XL)."""
     return next((w for w in pack.upper().replace(",", " ").split() if w in SIZES), "")
@@ -68,7 +77,7 @@ def export_rows(pallets: list) -> list:
     rows = []
     for p in pallets:
         for ln in p["lines"]:
-            rows.append({"pallet_no": p["pallet_ref"], "pallet_id": p["barcode"].replace("(00)", "", 1),
+            rows.append({"pallet_no": p["pallet_ref"], "pallet_id": pallet_code(p["barcode"]),
                          "variety": ln.get("variety") or "", "block": (ln.get("block_name") or "").replace("Block ", ""),
                          "cartons": ln["cartons"], "date_code": p["date_code"], "count": _count(ln["packaging_name"]),
                          "pack": ln["packaging_name"]})
