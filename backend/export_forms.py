@@ -7,19 +7,22 @@ XML: every page, border, picture, stamp box and revision number stays theirs.
 The USA gets its five sheets: DAFF's two-page accompanying document for the
 phyto inspection, the consignment note and PPECB's two-page litchi inspection
 findings sheet (Rev 2). The EU gets the same without the phyto pages. One row
-per pallet line; the forms hold MAX_LINES.
+per pallet line; the forms hold MAX_LINES. The PDF is Excel's own, made on the
+farm PC (forms_pdf).
 """
 import io
 import json
+import os
 import posixpath
 import re
+import subprocess
+import sys
+import tempfile
+import threading
 import zipfile
 from datetime import date, datetime
 from pathlib import Path
 from xml.sax.saxutils import escape
-
-from fpdf import FPDF
-from openpyxl import load_workbook
 
 PUC = "D2087"
 SIZES = ("XXXL", "XXL", "XL", "L", "M", "S", "MIX")
@@ -266,147 +269,52 @@ def forms(n, market: str = "USA") -> bytes:
     return _zip(_filled(_facts(n, market), market))
 
 
+class NoPdf(RuntimeError):
+    pass
+
+
+# Excel itself saves the workbook as PDF, so the PDF is Excel's own printout of the
+# department's form. PowerShell's COM, not a Python package: pip can't install past
+# the farm PC's Device Guard. Excel opened by a task running as SYSTEM needs its
+# profile's Desktop folder, so the script makes it first.
+EXCEL_PDF = r"""
+$ErrorActionPreference = 'Stop'
+foreach ($d in "$env:windir\System32\config\systemprofile\Desktop", "$env:windir\SysWOW64\config\systemprofile\Desktop") {
+  try { if ((Test-Path (Split-Path $d)) -and -not (Test-Path $d)) { New-Item -ItemType Directory -Path $d | Out-Null } } catch { }
+}
+$xl = New-Object -ComObject Excel.Application
+try {
+  $xl.Visible = $false; $xl.DisplayAlerts = $false; $xl.ScreenUpdating = $false
+  $wb = $xl.Workbooks.Open($env:FORMS_IN, 0, $true)
+  try { $wb.ExportAsFixedFormat(0, $env:FORMS_OUT) } finally { $wb.Close($false) }
+} finally { $xl.Quit(); [void][Runtime.InteropServices.Marshal]::ReleaseComObject($xl) }
+"""
+EXCEL = threading.Lock()  # one Excel at a time
+
+
+def _excel_pdf(xlsx: bytes) -> bytes:
+    if sys.platform != "win32":
+        raise NoPdf("The PDF is made by Excel on the farm PC: here, use the Excel file.")
+    with EXCEL, tempfile.TemporaryDirectory() as d:
+        src, out = Path(d, "forms.xlsx"), Path(d, "forms.pdf")
+        src.write_bytes(xlsx)
+        env = {**os.environ, "FORMS_IN": str(src), "FORMS_OUT": str(out)}
+        try:
+            r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                                "-Command", EXCEL_PDF], env=env, capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            # Only the server's own Excel (SYSTEM's), never one someone has open on the PC.
+            subprocess.run(["taskkill", "/F", "/IM", "EXCEL.EXE", "/FI", "USERNAME eq NT AUTHORITY\\SYSTEM"],
+                           capture_output=True)
+            raise NoPdf("Excel on the farm PC took too long to make the PDF: use the Excel file.")
+        if r.returncode or not out.exists():
+            why = (r.stderr or r.stdout).strip().splitlines()
+            raise NoPdf("Excel on the farm PC could not make the PDF (" + (why[0] if why else f"exit {r.returncode}")
+                        + "): use the Excel file.")
+        return out.read_bytes()
+
+
 def forms_pdf(n, market: str = "USA") -> bytes:
-    """The same workbook drawn as one PDF, a sheet a page, each fitted to A4.
-    Not Excel's own drawing (the farm PC has neither Excel nor LibreOffice):
-    the cells, borders, pictures and stamp boxes are where the workbook puts
-    them, the lettering is Helvetica."""
-    parts = _filled(_facts(n, market), market)
-    wb = load_workbook(io.BytesIO(_zip(parts)))
-    pdf = FPDF(unit="pt", format="A4")
-    pdf.set_auto_page_break(False)
-    pdf.c_margin = 0
-    for name, path in _sheets(parts).items():
-        _sheet_pdf(pdf, wb[name], _drawing(parts, path))
-    return bytes(pdf.output())
-
-
-# Drawing a worksheet in fpdf2.
-EMU_PT = 12700
-WEIGHT = {"hair": 0.25, "thin": 0.5, "dotted": 0.5, "dashed": 0.5, "medium": 1.2, "mediumDashed": 1.2, "thick": 2,
-          "double": 1.5}
-
-
-def _latin(v) -> str:
-    # fpdf2's built-in fonts are latin-1.
-    return ("" if v is None else str(v)).replace("√", "v").replace("’", "'") \
-        .encode("latin-1", "replace").decode("latin-1")
-
-
-def _rgb(color, default=(0, 0, 0)):
-    rgb = getattr(color, "rgb", None)
-    return tuple(int(rgb[-6:][i:i + 2], 16) for i in (0, 2, 4)) if isinstance(rgb, str) else default
-
-
-def _drawing(parts: dict, sheet: str) -> list:
-    """The sheet's pictures, boxes and lines: (kind, from, to, picture bytes or text),
-    from and to as (col, col offset, row, row offset) in points."""
-    out = []
-    for drawing in _targets(parts, sheet).values():
-        if not drawing.startswith("xl/drawings/drawing"):
-            continue
-        media = _targets(parts, drawing)
-        for anchor in re.findall(r"<xdr:twoCellAnchor.*?</xdr:twoCellAnchor>", parts[drawing].decode(), re.S):
-            ends = [(int(c), int(co) / EMU_PT, int(r), int(ro) / EMU_PT) for c, co, r, ro in re.findall(
-                r"<xdr:col>(\d+)</xdr:col><xdr:colOff>(-?\d+)</xdr:colOff><xdr:row>(\d+)</xdr:row><xdr:rowOff>(-?\d+)</xdr:rowOff>",
-                anchor)]
-            if "<xdr:pic>" in anchor:
-                embed = re.search(r'r:embed="([^"]+)"', anchor).group(1)
-                out.append(("picture", ends[0], ends[1], parts[media[embed]]))
-            elif "<xdr:cxnSp" in anchor:
-                out.append(("line", ends[0], ends[1], None))
-            elif "<xdr:sp" in anchor:
-                out.append(("box", ends[0], ends[1], " ".join(re.findall(r"<a:t>([^<]*)</a:t>", anchor))))
-    return out
-
-
-def _text(pdf, cell, x, y, w, h, scale):
-    a, font = cell.alignment, cell.font
-    pdf.set_font("Helvetica", ("B" if font.b else "") + ("I" if font.i else ""), (font.sz or 11) * scale)
-    pdf.set_text_color(*_rgb(font.color))
-    v = cell.value
-    text = _latin(v.strftime("%Y/%m/%d") if isinstance(v, (date, datetime)) else v)
-    pad = 2 * scale
-    lh = pdf.font_size * 1.15
-    align = {"center": "C", "right": "R"}.get(a.horizontal, "R" if isinstance(v, (int, float)) else "L")
-    if a.wrap_text:
-        lines = len(pdf.multi_cell(w - 2 * pad, lh, text, dry_run=True, output="LINES"))
-    else:
-        lines = 1
-    top = {"top": y + pad, "center": y + (h - lines * lh) / 2}.get(a.vertical, y + h - lines * lh - pad)
-    # Cut off at the row's height, as Excel does (Phyto (1)'s row 8 is too low to show);
-    # text that doesn't wrap runs over the cells beside it.
-    with pdf.rect_clip(x, y, w, h) if a.wrap_text else pdf.rect_clip(x - w - 400, y, 3 * w + 800, h):
-        pdf.set_xy(x + pad, top)
-        if a.wrap_text:
-            pdf.multi_cell(w - 2 * pad, lh, text, align=align)
-        else:
-            pdf.cell(w - 2 * pad, lh, text, align=align)
-
-
-def _sheet_pdf(pdf, ws, drawing):
-    fmt = ws.sheet_format
-    width = lambda c: 0 if ws.column_dimensions[chr(64 + c)].hidden else (
-        ws.column_dimensions[chr(64 + c)].width or fmt.defaultColWidth or 8.43)  # noqa: E731
-    height = lambda r: 0 if ws.row_dimensions[r].hidden else (  # noqa: E731
-        ws.row_dimensions[r].height or fmt.defaultRowHeight or 15)
-    ncol, nrow = ws.max_column, ws.max_row
-    colw = [(width(c) * 7 + 5) * 0.75 for c in range(1, ncol + 1)]  # Excel's character width in points
-    rowh = [height(r) for r in range(1, nrow + 1)]
-    m = ws.page_margins
-    left, top = m.left * 72, m.top * 72
-    scale = min((pdf.w - left - m.right * 72) / sum(colw), (pdf.h - top - m.bottom * 72) / sum(rowh))
-    xs = [left + sum(colw[:i]) * scale for i in range(ncol + 1)]
-    ys = [top + sum(rowh[:i]) * scale for i in range(nrow + 1)]
-    spans, hidden = {}, set()
-    for rng in ws.merged_cells.ranges:
-        spans[(rng.min_row, rng.min_col)] = (rng.max_row, rng.max_col)
-        hidden |= {(r, c) for r in range(rng.min_row, rng.max_row + 1) for c in range(rng.min_col, rng.max_col + 1)}
-    pdf.add_page()
-
-    for r in range(1, nrow + 1):  # fills first, then borders over them, then text
-        for c in range(1, ncol + 1):
-            cell = ws.cell(r, c)
-            if cell.fill.fill_type == "solid" and isinstance(cell.fill.fgColor.rgb, str):
-                pdf.set_fill_color(*_rgb(cell.fill.fgColor, (255, 255, 255)))
-                pdf.rect(xs[c - 1], ys[r - 1], xs[c] - xs[c - 1], ys[r] - ys[r - 1], style="F")
-    for r in range(1, nrow + 1):
-        for c in range(1, ncol + 1):
-            b = ws.cell(r, c).border
-            x0, x1, y0, y1 = xs[c - 1], xs[c], ys[r - 1], ys[r]
-            for side, (ax, ay, bx, by) in ((b.left, (x0, y0, x0, y1)), (b.right, (x1, y0, x1, y1)),
-                                           (b.top, (x0, y0, x1, y0)), (b.bottom, (x0, y1, x1, y1))):
-                if side is not None and side.style:
-                    pdf.set_draw_color(*_rgb(side.color))
-                    pdf.set_line_width(WEIGHT.get(side.style, 0.5) * scale)
-                    pdf.line(ax, ay, bx, by)
-    for r in range(1, nrow + 1):
-        for c in range(1, ncol + 1):
-            if (r, c) in hidden and (r, c) not in spans:
-                continue
-            cell = ws.cell(r, c)
-            if cell.value in (None, ""):
-                continue
-            r2, c2 = spans.get((r, c), (r, c))
-            _text(pdf, cell, xs[c - 1], ys[r - 1], xs[c2] - xs[c - 1], ys[r2] - ys[r - 1], scale)
-
-    def at(end):
-        col, col_off, row, row_off = end
-        return (xs[min(col, ncol)] + col_off * scale, ys[min(row, nrow)] + row_off * scale)
-
-    pdf.set_draw_color(0, 0, 0)
-    pdf.set_line_width(0.75 * scale)
-    for kind, a, b, what in drawing:
-        (x0, y0), (x1, y1) = at(a), at(b)
-        if kind == "picture":
-            pdf.image(io.BytesIO(what), x0, y0, x1 - x0, y1 - y0)
-        elif kind == "line":
-            pdf.line(x0, y0, x1, y1)
-        else:
-            pdf.set_fill_color(255, 255, 255)
-            pdf.rect(x0, y0, x1 - x0, y1 - y0, style="DF")
-            if what:
-                pdf.set_font("Helvetica", "B", 11 * scale)
-                pdf.set_text_color(166, 166, 166)
-                pdf.set_xy(x0, y0 + 4 * scale)
-                pdf.cell(x1 - x0, 12 * scale, _latin(what), align="C")
+    """The same workbook as one PDF, saved by Excel itself: what printing it
+    from Excel gives, a sheet a page by the department's own page setup."""
+    return _excel_pdf(forms(n, market))
