@@ -130,7 +130,8 @@ def test_last_number_follows_notes_and_settings_can_change_it(client, admin_clie
     assert last() == 1341  # cleared: the highest note ever used
 
 
-def test_usa_forms_are_drawn_from_the_note(client, pallets):
+def test_usa_forms_are_the_departments_workbook_filled_in(client, pallets):
+    import zipfile
     from io import BytesIO
 
     from openpyxl import load_workbook
@@ -138,56 +139,66 @@ def test_usa_forms_are_drawn_from_the_note(client, pallets):
     r = client.get("/api/deliverynote/n1/usa_forms.xlsx")
     assert r.status_code == 200 and 'usa_forms_LW-1335.xlsx' in r.headers["content-disposition"]
     wb = load_workbook(BytesIO(r.content))
-    assert wb.sheetnames == ["Phyto", "Consignment", "Inspection Sheet"]
-    p, c, ins = wb["Phyto"], wb["Consignment"], wb["Inspection Sheet"]
-    assert (p["D5"].value, p["B19"].value, p["J20"].value, p["F16"].value, p["B21"].value) == (
-        "LW-1335", "060099005963004759", "002", 120, None)
-    assert (c["J4"].value, c["C15"].value, c["E4"].value, c["K16"].value) == ("LW-1335", "B2", "Boeretrust", 120)
+    assert wb.sheetnames == ["Phyto (1)", "Phyto (2)", "Consignment 1", "Inspection Sheet", "Inspection Sheet (2)"]
+    p, p2, c, ins = wb["Phyto (1)"], wb["Phyto (2)"], wb["Consignment 1"], wb["Inspection Sheet"]
+    assert (p["C5"].value, p["B27"].value, p["N28"].value, p["K19"].value, p["L23"].value, p["B29"].value, p["A29"].value) == (
+        "LW 1335", "060099005963004759", "002", 120, 2, None, None)
+    assert (p2["C5"].value, p2["A27"].value, p2["H19"].value) == ("LW 1335", None, None)  # nothing on page 2
+    assert (c["K2"].value, c["C12"].value, c["F2"].value, c["K32"].value, c["K8"].value) == ("LW 1335", "B2", "Boeretrust", 120, "USA")
+    assert (ins["A16"].value, ins["D17"].value, ins["A18"].value, ins["S4"].value) == ("B2", "USA", None, "Rev     2")
+    with zipfile.ZipFile(BytesIO(r.content)) as z:  # their logo and stamps, and values only: nothing left to work out
+        assert "xl/media/image2.jpeg" in z.namelist() and "xl/calcChain.xml" not in z.namelist()
+        assert not any(b"<f>" in z.read(n) for n in z.namelist() if n.startswith("xl/worksheets/"))
     assert client.get("/api/deliverynote/nope/usa_forms.xlsx").status_code == 404
     assert client.get("/api/deliverynote/n1/usa.xlsx").status_code == 404  # no simple sheets
-    assert (ins["A11"].value, ins["D11"].value) == ("B2", "USA")
 
 
 def test_export_forms_also_come_as_one_pdf(client, pallets):
     sync(client, note(pallets=("p1", "p2")))
     r = client.get("/api/deliverynote/n1/usa_forms.pdf")
     assert r.status_code == 200 and 'usa_forms_LW-1335.pdf' in r.headers["content-disposition"]
-    assert r.content.startswith(b"%PDF") and r.content.count(b"/Type /Page\n") == 3  # a page a sheet
-    assert client.get("/api/deliverynote/n1/eu_forms.pdf").content.count(b"/Type /Page\n") == 2  # no phyto
+    assert r.content.startswith(b"%PDF") and r.content.count(b"/Type /Page\n") == 5  # a page a sheet
+    assert client.get("/api/deliverynote/n1/eu_forms.pdf").content.count(b"/Type /Page\n") == 3  # no phyto
     assert client.get("/api/deliverynote/n1/uk_forms.pdf").status_code == 404
     assert client.get("/api/deliverynote/nope/usa_forms.pdf").status_code == 404
 
 
-def test_usa_forms_keep_phyto_on_one_page_and_print_the_target_receiver():
+def test_the_forms_hold_21_pallet_lines_numbered_on_over_the_phyto_pages():
     import json as _json
     from io import BytesIO
 
+    import pytest
     from openpyxl import load_workbook
 
     import export_forms
     from models import DeliveryNote
-    line = {"cartons": 192, "packaging_name": "Rhino 4.5 kg XL", "carton_kg": 4.5}
-    n = DeliveryNote(uuid="x", note_no=7, created_at=datetime.now(), loaded_on="2026-10-26", receiver="AgriLink",
-                     pallets=_json.dumps([{"pallet_ref": str(k), "barcode": "", "date_code": "", "lines": [line]} for k in range(27)]))
-    wb = load_workbook(BytesIO(export_forms.forms(n, "Seasons Farm Fresh\nToronto")))
-    p = wb["Phyto"]
-    assert wb.sheetnames == ["Phyto", "Consignment", "Inspection Sheet"]
-    assert (p["A45"].value, p.page_setup.fitToHeight) == (27, 1)
-    c = wb["Consignment"]
-    assert (c["J8"].value, c["A8"].value, c["C10"].value, c["A11"].value) == (
-        "Seasons Farm Fresh\nToronto", "PUC code", "4050373828202", "GlobalG.A.P. Certified")
+    line = {"cartons": 192, "packaging_name": "Rhino 4.5 kg XL", "carton_kg": 4.5, "block_name": "Block 34"}
+
+    def note_of(k):
+        return DeliveryNote(uuid="x", note_no=7, created_at=datetime.now(), loaded_on="2026-11-18", receiver="AgriLink",
+                            pallets=_json.dumps([{"pallet_ref": f"{i:03d}", "barcode": f"B{i}", "date_code": "7304",
+                                                  "market_name": "USA", "lines": [line]} for i in range(k)]))
+    wb = load_workbook(BytesIO(export_forms.forms(note_of(21))))
+    p, p2, c = wb["Phyto (1)"], wb["Phyto (2)"], wb["Consignment 1"]
+    assert (p["A39"].value, p["B39"].value, p["J39"].value, p["L39"].value, p["M39"].value) == (13, "B12", 34, 7304, "XL")
+    assert (p2["A27"].value, p2["B34"].value, p2["K19"].value, p2["L19"].value, p2["A35"].value) == (14, "B20", 8 * 192, 8, None)
+    assert (c["C31"].value, c["J31"].value, c["I31"].value, c["C6"].value.day) == ("B20", "Rhino 4.5 kg", 34, 18)
+    ins2 = wb["Inspection Sheet (2)"]
+    assert (ins2["A14"].value, ins2["A32"].value, ins2["A34"].value, ins2["D33"].value) == ("B11", "B20", None, "USA")
+    with pytest.raises(export_forms.TooManyLines):
+        export_forms.forms(note_of(22))
 
 
-def test_export_papers_print_the_notes_own_target_receiver(client, admin_client, pallets):
+def test_eu_papers_are_the_same_without_the_phyto_pages(client, admin_client, pallets):
     from io import BytesIO
 
     from openpyxl import load_workbook
     t = admin_client.post("/api/settings/targetreceivers", json={"name": "Rotterdam Fresh", "market": "EU"}).json()
     sync(client, note(pallets=("p1", "p2"), target_receiver_id=t["id"], target_receiver="Rotterdam Fresh\nRotterdam"))
     wb = load_workbook(BytesIO(client.get("/api/deliverynote/n1/eu_forms.xlsx").content))
-    assert wb.sheetnames == ["Consignment", "Inspection Sheet"]
-    c, ins = wb["Consignment"], wb["Inspection Sheet"]
-    assert (c["J7"].value, c["J8"].value, ins["D10"].value) == ("EU", "Rotterdam Fresh\nRotterdam", "EU")
+    assert wb.sheetnames == ["Consignment 1", "Inspection Sheet", "Inspection Sheet (2)"]
+    c, ins = wb["Consignment 1"], wb["Inspection Sheet"]
+    assert (c["K8"].value, ins["D15"].value) == ("EU", "EU")
     assert client.get("/api/deliverynote/n1/uk_forms.xlsx").status_code == 404
     # In use on a note: retire it, don't delete it.
     assert admin_client.delete(f"/api/settings/targetreceivers/{t['id']}").status_code == 409
@@ -227,8 +238,8 @@ def test_a_receiver_copied_with_only_its_name_prints_its_market_and_city(client,
     from openpyxl import load_workbook
     r = admin_client.post("/api/settings/receivers", json={"name": "ToroFruit", "market": "Joburg Mark", "city": "Johannesburg"}).json()
     sync(client, note(receiver_id=r["id"], receiver="ToroFruit"))  # its market and city set in Settings later
-    c = load_workbook(BytesIO(client.get("/api/deliverynote/n1/eu_forms.xlsx").content))["Consignment"]
-    assert (c["E4"].value, c["E5"].value, c["E6"].value) == ("ToroFruit", "Joburg Mark", "Johannesburg")
+    c = load_workbook(BytesIO(client.get("/api/deliverynote/n1/eu_forms.xlsx").content))["Consignment 1"]
+    assert (c["F2"].value, c["F3"].value, c["F4"].value) == ("ToroFruit", "Joburg Mark", "Johannesburg")
     assert notes(client)[0]["receiver"] == "ToroFruit"  # the note's own copy is untouched
 
 
