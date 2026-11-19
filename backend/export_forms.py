@@ -63,9 +63,15 @@ def pallet_code(code: str) -> str:
     return m.group(1) if m else c
 
 
+# A pack that only ever holds one size: a Rhino carton is always XL.
+PACK_COUNT = {"RHINO": "XL"}
+
+
 def _count(pack: str) -> str:
-    """The size count (XL) out of the pack's name (Rhino 4.5 kg XL)."""
-    return next((w for w in pack.upper().replace(",", " ").split() if w in SIZES), "")
+    """The size count (XL) out of the pack's name (Rhino 4.5 kg XL), else the
+    one size its pack always holds (4.5kg Rhino)."""
+    words = pack.upper().replace(",", " ").split()
+    return next((w for w in words if w in SIZES), None) or next((PACK_COUNT[w] for w in words if w in PACK_COUNT), "")
 
 
 def _package(pack: str) -> str:
@@ -88,7 +94,7 @@ def export_rows(pallets: list) -> list:
         for ln in p["lines"]:
             rows.append({"pallet": k, "pallet_no": p["pallet_ref"], "pallet_id": pallet_code(p["barcode"]),
                          "variety": ln.get("variety") or "", "block": (ln.get("block_name") or "").replace("Block ", ""),
-                         "cartons": ln["cartons"], "date_code": p["date_code"], "count": ln.get("size") or _count(ln["packaging_name"]),
+                         "cartons": ln["cartons"], "date_code": p["date_code"], "count": _count(ln["packaging_name"]),
                          "pack": ln["packaging_name"]})
     return rows
 
