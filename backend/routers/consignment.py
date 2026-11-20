@@ -83,16 +83,18 @@ def _pallet_problem(rec: PalletIn, session: Session) -> Optional[str]:
             return "a pallet needs its scanned barcode"
         if not (len(rec.pallet_ref) == 3 and rec.pallet_ref.isascii() and rec.pallet_ref.isdigit()):
             return "the pallet number is 3 digits"
-        # Unique across every stack in the season (the farm-local year the pallet
-        # was scanned in: litchi season sits inside one calendar year). A pallet
-        # taken off frees its number.
+        if rec.supplier_id is None:
+            return "a pallet needs its supplier"
+        # Unique among its supplier's pallets, across every stack, in the season
+        # (the farm-local year the pallet was scanned in: litchi season sits
+        # inside one calendar year): each supplier's pallets are numbered on
+        # their own. A pallet taken off frees its number.
         season = to_local(_utc_naive(rec.scanned_at)).year
         twin = session.exec(select(Pallet).where(Pallet.pallet_year == season, Pallet.pallet_ref == rec.pallet_ref,
+                                                 Pallet.supplier_id == rec.supplier_id,
                                                  Pallet.uuid != rec.uuid, Pallet.removed == False)).first()  # noqa: E712
         if twin is not None:
             return f"pallet {rec.pallet_ref} is already used this season"
-        if rec.supplier_id is None:
-            return "a pallet needs its supplier"
         if rec.market_id is None or session.get(Market, rec.market_id) is None:
             return "unknown market"
         problem = _lines_problem(rec.lines)

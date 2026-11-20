@@ -13,6 +13,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, SQLModel, select
 
+import boord
 from db import get_packhouse_session
 from models import JuiceBin
 from routers.sulfur import _iso, _now, _utc_naive
@@ -41,6 +42,8 @@ class BinIn(SQLModel):
     changed_by: str = ""
     changed_by_name: str = ""
     removed: bool = False
+    supplier_id: Optional[int] = None   # whose fruit; none (a phone not yet on v0.73) is the farm's own
+    supplier_name: str = ""
 
 
 class SyncIn(SQLModel):
@@ -48,7 +51,15 @@ class SyncIn(SQLModel):
     bins: List[BinIn] = []
 
 
-def _bin_problem(rec: BinIn, session: Session) -> Optional[str]:
+def _supplier_of(rec: BinIn, session: Session, own: Optional[int]) -> Optional[int]:
+    """Whose bin it is: set once, when it first arrives."""
+    row = session.get(JuiceBin, rec.uuid)
+    if row is not None and row.supplier_id is not None:
+        return row.supplier_id
+    return rec.supplier_id if rec.supplier_id is not None else own
+
+
+def _bin_problem(rec: BinIn, session: Session, supplier_id: Optional[int]) -> Optional[str]:
     if not rec.uuid or len(rec.uuid) > 64:
         return "bad uuid"
     if rec.removed:
@@ -67,11 +78,11 @@ def _bin_problem(rec: BinIn, session: Session) -> Optional[str]:
         return "a weight is more than 0 kg"
     if rec.empty_kg is not None and rec.full_kg is not None and rec.full_kg <= rec.empty_kg:
         return "the full weight is more than the empty weight"
-    # Unique in the season (the farm-local year it was weighed) among the bins,
-    # or the crates; one taken off frees its number.
+    # Unique in the season (the farm-local year it was weighed) among its
+    # supplier's bins, or crates; one taken off frees its number.
     season = to_local(_utc_naive(rec.weighed_at)).year
     twin = session.exec(select(JuiceBin).where(JuiceBin.bin_year == season, JuiceBin.bin_no == rec.bin_no,
-                                               JuiceBin.container == rec.container,
+                                               JuiceBin.container == rec.container, JuiceBin.supplier_id == supplier_id,
                                                JuiceBin.uuid != rec.uuid, JuiceBin.removed == False)).first()  # noqa: E712
     if twin is not None:
         return f"{rec.container} {rec.bin_no} is already used this season"
@@ -89,15 +100,19 @@ def bin_out(b: JuiceBin) -> dict:
 def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
     now = _now()
     synced, rejected = [], []
+    own = boord.own_supplier_id()
     for rec in body.bins:
-        problem = _bin_problem(rec, session)
+        supplier_id = _supplier_of(rec, session, own)
+        problem = _bin_problem(rec, session, supplier_id)
         if problem:
             rejected.append({"uuid": rec.uuid, "error": problem})
             continue
         row = session.get(JuiceBin, rec.uuid)
         if row is None:
             weighed = _utc_naive(rec.weighed_at)
+            name = rec.supplier_name or (boord.supplier(supplier_id) or {}).get("name", "")
             row = JuiceBin(uuid=rec.uuid, container=rec.container, bin_no=rec.bin_no, weighed_at=weighed, bin_year=to_local(weighed).year,
+                           supplier_id=supplier_id, supplier_name=name,
                            device=body.device, synced_at=now, made_by=rec.made_by, made_by_name=rec.made_by_name)
         row.removed, row.changed_by, row.changed_by_name = rec.removed, rec.changed_by, rec.changed_by_name
         if not rec.removed:

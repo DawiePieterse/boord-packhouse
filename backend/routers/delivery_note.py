@@ -10,6 +10,10 @@ pallet when the note is saved, so a pallet edited afterwards leaves a note
 that has gone out as it was. A juice load is the same with juice bins
 (routers/juice.py) in place of pallets: a note holds one or the other. The PDF is the paper note with every pallet and
 its lines, to print or share on WhatsApp.
+
+A note is one supplier's: only that supplier's pallets or bins go on it, its
+number runs in that supplier's own series, and it keeps a copy of the
+supplier's details (Boord's supplier row) that its documents print.
 """
 import json
 from datetime import date, datetime, timedelta
@@ -19,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlmodel import Session, SQLModel, func, select
 
+import boord
 import export_forms
 from db import get_packhouse_session
 from models import DeliveryNote, DeliveryNoteSettings, JuiceBin, Pallet, Receiver, TargetReceiver, Transporter
@@ -52,6 +57,7 @@ class NoteIn(SQLModel):
     changed_by: str = ""
     changed_by_name: str = ""
     removed: bool = False
+    supplier_id: Optional[int] = None   # whose note; none (a phone not yet on v0.73) is the farm's own
 
 
 class SyncIn(SQLModel):
@@ -72,15 +78,32 @@ def _juice(juice: bool):
     return DeliveryNote.bins != "[]" if juice else DeliveryNote.bins == "[]"
 
 
-def _note_problem(rec: NoteIn, session: Session) -> Optional[str]:
+def _supplier_of(rec: NoteIn, session: Session, own: Optional[int]) -> Optional[int]:
+    """Whose note it is: set once, when it first arrives."""
+    row = session.get(DeliveryNote, rec.uuid)
+    if row is not None and row.supplier_id is not None:
+        return row.supplier_id
+    return rec.supplier_id if rec.supplier_id is not None else own
+
+
+def _had(session: Session, uuid: str, field: str) -> set:
+    """The pallets (or bins) the saved note already holds: one from before
+    notes were kept per supplier may hold another supplier's, and stays."""
+    row = session.get(DeliveryNote, uuid)
+    return {c["uuid"] for c in json.loads(getattr(row, field) or "[]")} if row is not None else set()
+
+
+def _note_problem(rec: NoteIn, session: Session, supplier_id: Optional[int], own: Optional[int]) -> Optional[str]:
     if not rec.uuid or len(rec.uuid) > 64:
         return "bad uuid"
     if rec.removed:
         return None
     if rec.note_no < 1:
         return "the note number is a whole number from 1"
-    # A note taken off frees its number. Juice notes (J-0001) count on their own.
+    # Each supplier has its own numbers, and its juice notes (J-0001) count on
+    # their own. A note taken off frees its number.
     twin = session.exec(select(DeliveryNote).where(DeliveryNote.note_no == rec.note_no, DeliveryNote.uuid != rec.uuid,
+                                                   DeliveryNote.supplier_id == supplier_id,
                                                    DeliveryNote.removed == False, _juice(bool(rec.bins)))).first()  # noqa: E712
     if twin is not None:
         return f"note {export_forms.note_label(twin)} is already used"
@@ -91,16 +114,19 @@ def _note_problem(rec: NoteIn, session: Session) -> Optional[str]:
     if rec.pallets and rec.bins:
         return "a note holds pallets or juice bins, not both"
     if rec.bins:
-        return _bins_problem(rec, session)
+        return _bins_problem(rec, session, supplier_id, own)
     if not rec.pallets:
         return "a note needs at least one pallet"
     uuids = _uuids(rec)
     if len(set(uuids)) != len(uuids):
         return "a pallet is on it twice"
+    had = _had(session, rec.uuid, "pallets")
     for uuid in uuids:
         p = session.get(Pallet, uuid)
         if p is None or p.removed:
             return "a pallet on it is not on the server (yet), or was deleted"
+        if p.supplier_id != supplier_id and uuid not in had:
+            return f"pallet {p.pallet_ref} is {p.supplier_name or 'another supplier'}'s: a note holds one supplier's pallets"
     if len({export_forms.market_group(session.get(Pallet, u).market_name) for u in uuids}) > 1:
         return "a note is all USA, all EU or all local pallets"
     # ponytail: scans every live note; a JSON column, fine for a farm's season of notes
@@ -113,14 +139,17 @@ def _note_problem(rec: NoteIn, session: Session) -> Optional[str]:
     return None
 
 
-def _bins_problem(rec: NoteIn, session: Session) -> Optional[str]:
+def _bins_problem(rec: NoteIn, session: Session, supplier_id: Optional[int], own: Optional[int]) -> Optional[str]:
     uuids = _uuids(rec, "bins")
     if len(set(uuids)) != len(uuids):
         return "a bin or crate is on it twice"
+    had = _had(session, rec.uuid, "bins")
     for uuid in uuids:
         b = session.get(JuiceBin, uuid)
         if b is None or b.removed:
             return "a bin or crate on it is not on the server (yet), or was deleted"
+        if (own if b.supplier_id is None else b.supplier_id) != supplier_id and uuid not in had:
+            return f"{b.container} {b.bin_no} is {b.supplier_name or 'another supplier'}'s: a note holds one supplier's fruit"
         if b.full_kg is None or (b.empty_kg is None and b.container == "bin"):
             return f"{b.container} {b.bin_no} needs its empty and full weights"
     # ponytail: scans every live note, as for the pallets
@@ -153,6 +182,7 @@ def note_out(n: DeliveryNote) -> dict:
     o = n.model_dump()
     o["pallets"] = json.loads(n.pallets or "[]")
     o["bins"] = json.loads(n.bins or "[]")
+    o["supplier"] = json.loads(n.supplier or "{}")
     for key in ("created_at", "synced_at"):
         o[key] = _iso(o[key])
     return o
@@ -162,14 +192,16 @@ def note_out(n: DeliveryNote) -> dict:
 def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
     now = _now()
     synced, rejected = [], []
+    own = boord.own_supplier_id()
     for rec in body.notes:
-        problem = _note_problem(rec, session)
+        supplier_id = _supplier_of(rec, session, own)
+        problem = _note_problem(rec, session, supplier_id, own)
         if problem:
             rejected.append({"uuid": rec.uuid, "error": problem})
             continue
         row = session.get(DeliveryNote, rec.uuid)
         if row is None:
-            row = DeliveryNote(uuid=rec.uuid, note_no=rec.note_no, created_at=_utc_naive(rec.created_at),
+            row = DeliveryNote(uuid=rec.uuid, note_no=rec.note_no, created_at=_utc_naive(rec.created_at), supplier_id=supplier_id,
                                device=body.device, synced_at=now, made_by=rec.made_by, made_by_name=rec.made_by_name)
         row.removed, row.changed_by, row.changed_by_name = rec.removed, rec.changed_by, rec.changed_by_name
         if not rec.removed:
@@ -180,12 +212,15 @@ def sync(body: SyncIn, session: Session = Depends(get_packhouse_session)):
             row.receiver_id, row.transporter_id = rec.receiver_id, rec.transporter_id
             row.receiver, row.transporter, row.seal_no, row.cooled_to = rec.receiver, rec.transporter, rec.seal_no, rec.cooled_to
             row.loaded_on, row.offloaded_on = rec.loaded_on, rec.offloaded_on
+            # Whose it is, as Boord has the supplier now: what its documents print.
+            row.supplier_id = supplier_id
+            row.supplier = json.dumps((boord.supplier(supplier_id) or {"id": supplier_id}) if supplier_id is not None else {})
             # Only an export note has a target receiver.
             export = bool(rec.pallets) and export_forms.market_group(session.get(Pallet, _uuids(rec)[0]).market_name) != "local"
             row.target_receiver_id = rec.target_receiver_id if export else None
             row.target_receiver = rec.target_receiver.strip() if export else ""
         session.add(row)
-        if not rec.removed and not rec.bins:  # the last B-/LW- number moves on past this one
+        if not rec.removed and not rec.bins and supplier_id == own:  # the farm's last B-/LW- number moves on past this one
             settings = session.get(DeliveryNoteSettings, 1)
             if settings is not None and (settings.last_no or 0) < rec.note_no:
                 settings.last_no = rec.note_no
@@ -212,29 +247,39 @@ def options(session: Session = Depends(get_packhouse_session)):
     receivers and target receivers in use, the cooled-to temperature it starts with, and the
     last note number (Settings', else the highest ever used: the phones only
     hold 90 days of notes), so the next one follows on after a quiet spell too.
-    Juice notes have their own series from J-0001: last_juice_no is its highest live one."""
+    Juice notes have their own series from J-0001: last_juice_no is its highest live one.
+    Those two are the farm's own. last_nos has every supplier's, by supplier
+    id: {"3": {"no": 12, "juice": 2}}, another supplier's being its highest live note."""
     def active(model):
         # A to Z by name, capitals or not
         return session.exec(select(model).where(model.active == True).order_by(func.lower(model.name), model.id)).all()  # noqa: E712
     settings = session.get(DeliveryNoteSettings, 1)
+    own = boord.own_supplier_id()
+    mine = (DeliveryNote.supplier_id == own,) if own is not None else ()
+    last_no = (settings.last_no if settings and settings.last_no
+               else session.exec(select(func.max(DeliveryNote.note_no)).where(_juice(False), *mine)).one())
+    last_juice_no = session.exec(select(func.max(DeliveryNote.note_no))
+                                 .where(_juice(True), DeliveryNote.removed == False, *mine)).one() or 0  # noqa: E712
+    last_nos = {}
+    for supplier_id, juice, top in session.exec(
+            select(DeliveryNote.supplier_id, _juice(True), func.max(DeliveryNote.note_no))
+            .where(DeliveryNote.removed == False).group_by(DeliveryNote.supplier_id, _juice(True))).all():  # noqa: E712
+        last_nos.setdefault(str(supplier_id), {})["juice" if juice else "no"] = top
+    if own is not None:
+        last_nos[str(own)] = {"no": last_no, "juice": last_juice_no}
     return {"transporters": active(Transporter), "receivers": active(Receiver),
             "target_receivers": active(TargetReceiver),
             "cooled_to": settings.cooled_to if settings else 8.0,
-            "last_no": (settings.last_no if settings and settings.last_no
-                        else session.exec(select(func.max(DeliveryNote.note_no)).where(_juice(False))).one()),
-            "last_juice_no": session.exec(select(func.max(DeliveryNote.note_no))
-                                          .where(_juice(True), DeliveryNote.removed == False)).one() or 0}  # noqa: E712
+            "last_no": last_no, "last_juice_no": last_juice_no, "last_nos": last_nos}
 
 
-# The printed parts of the paper note.
-FARM = "Bekfontein Boerdery"
-CONTACT = ["Tel: 083 627 6926", "Office: 083 762 1395", "Email: andre@laughw.co.za"]
-SENDER = ["BEKFONTEIN BOERDERY", "POSBUS 1290", "MALELANE", "1320"]
+# The printed parts of the paper note. Whose name, registration line, contact
+# and address they carry is the note's supplier (export_forms.sender).
 # Printed in Afrikaans, as the paper note is, with the English beside it.
-SMALL_PRINT = ("Bekfontein Boerdery is nie verantwoordelik vir enige tekorte of beskadiging van goedere voor of na "
+SMALL_PRINT = ("{name} is nie verantwoordelik vir enige tekorte of beskadiging van goedere voor of na "
                "aflewering nie. Indien enige eise: Doen dit asseblief stiptelik binne sewe dae na aflewering d.m.v. "
                "'n epos na ons kantore.\n"
-               "Bekfontein Boerdery is not responsible for any shortage of or damage to goods before or after "
+               "{name} is not responsible for any shortage of or damage to goods before or after "
                "delivery. Any claim: please make it promptly, within seven days of delivery, by e-mail to our offices.")
 
 
@@ -303,12 +348,17 @@ def _draw(n: DeliveryNote, pages: int):
     def value(v, style="", **kw):
         text(10, v, style, h=kw.pop("h", 5), **kw)
 
-    # Header: farm and contact, then the note's title and number.
+    # Header: the supplier whose note it is and its contact lines, then the
+    # note's title and number. A long name shrinks to stay clear of the contact.
+    who = export_forms.sender(n)
+    contact = [line.strip() for line in who["contact"].split("\n") if line.strip()][:3]
     top = pdf.get_y()
-    text(18, FARM, "BI", h=9, new_x="LMARGIN", new_y="NEXT")
-    text(8, "(EDMS) BPK    Reg Nr 1992/002298/07", h=4, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "BI", 18)
+    text(min(18, 18 * (w - 62) / max(pdf.get_string_width(_latin(who["name"])), 1)), who["name"], "BI", h=9,
+         new_x="LMARGIN", new_y="NEXT")
+    text(8, who["reg_number"], h=4, new_x="LMARGIN", new_y="NEXT")
     pdf.set_y(top)
-    for line in CONTACT:
+    for line in contact:
         text(8, line, h=4, w=w, align="R", new_x="LMARGIN", new_y="NEXT")
     pdf.set_y(top + 15)
 
@@ -328,7 +378,8 @@ def _draw(n: DeliveryNote, pages: int):
     # Afsender | Ontvanger, the same way (capitals, as the printed sender), then
     # three equal signature boxes.
     x0, y = pdf.l_margin, pdf.get_y()
-    addresses = ((x0, "AFSENDER / SENDER", SENDER), (x0 + half, "ONTVANGER / RECEIVER", n.receiver.strip().upper().split("\n")[:5]))
+    sender = [who["name"].upper()] + [line.strip().upper() for line in who["address"].split("\n") if line.strip()][:4]
+    addresses = ((x0, "AFSENDER / SENDER", sender), (x0 + half, "ONTVANGER / RECEIVER", n.receiver.strip().upper().split("\n")[:5]))
     tall = 6 + 5 * max(len(lines) for _, _, lines in addresses) + 1.5  # as tall as the longer address, no more
     pdf.rect(x0, y, w, tall)
     pdf.line(x0 + half, y, x0 + half, y + tall)
@@ -446,7 +497,7 @@ def _draw(n: DeliveryNote, pages: int):
         value(_day(v), w=half - room - 3)
     pdf.set_xy(x0, y + 8)
     pdf.set_font("Helvetica", "", 6)
-    pdf.multi_cell(w, 3, _latin(SMALL_PRINT), border=1, align="C", padding=(1, 1.5), new_x="LMARGIN", new_y="NEXT")
+    pdf.multi_cell(w, 3, _latin(SMALL_PRINT.format(name=who["name"])), border=1, align="C", padding=(1, 1.5), new_x="LMARGIN", new_y="NEXT")
     return pdf
 
 
@@ -455,7 +506,7 @@ def note_pdf(uuid: str, session: Session = Depends(get_packhouse_session)):
     """The note as the paper Afleweringsnota, on A4, signature lines blank.
     Only a local note has one: an export note goes out on its market's papers."""
     n = _live(uuid, session)
-    if export_forms.note_label(n).startswith("LW"):
+    if export_forms.is_export(n):
         raise HTTPException(409, "An export note goes out on its market's documents, not the delivery note")
     pdf = _draw(n, _draw(n, 1).page_no())
     name = f"afleweringsnota_{export_forms.note_label(n)}.pdf"

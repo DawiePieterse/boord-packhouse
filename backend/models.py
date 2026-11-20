@@ -246,7 +246,7 @@ class Pallet(SQLModel, table=True):
     barcode: str
     scanned_at: datetime
     lines: str = "[]"
-    pallet_ref: str = ""        # the 3-digit pallet number written on the sheet, unique for the season
+    pallet_ref: str = ""        # the 3-digit pallet number written on the sheet, unique for the season among its supplier's
     supplier_id: Optional[int] = None   # Boord's supplier, name copied like a sulfur run's
     supplier_name: str = ""
     market_id: Optional[int] = None
@@ -314,7 +314,8 @@ class DeliveryNote(SQLModel, table=True):
     live notes. pallets is a JSON list of the Pallet Stack pallets on the
     truck, each a copy taken when the note was saved ({uuid, pallet_ref,
     barcode, date_code, supplier_name, market_name, lines}); a pallet is on at
-    most one live note. Dates are farm-local "YYYY-MM-DD"."""
+    most one live note. Dates are farm-local "YYYY-MM-DD". A note is one
+    supplier's, and note_no is unique among that supplier's live notes."""
     uuid: str = Field(primary_key=True)
     note_no: int
     created_at: datetime
@@ -324,6 +325,14 @@ class DeliveryNote(SQLModel, table=True):
     transporter: str = ""
     target_receiver_id: Optional[int] = None  # an export note's TargetReceiver, name and address
     target_receiver: str = ""                 # copied, one per line
+    # Whose note it is: one supplier's pallets or bins, with that supplier's own
+    # series of note numbers. supplier is a JSON copy of Boord's supplier row
+    # (boord.suppliers: name, PUC, GGN, the name, contact and address its
+    # documents carry, its note prefix), taken each time the note is saved, so
+    # a note that has gone out prints as it went. "{}" on a note from before
+    # v0.73: the farm's own, printed as it always was (export_forms.sender).
+    supplier_id: Optional[int] = None
+    supplier: str = "{}"
     seal_no: str = ""
     cooled_to: str = ""         # Verkoel op, in °C
     loaded_on: str = ""         # Oplaaidatum
@@ -344,7 +353,7 @@ class JuiceBin(SQLModel, table=True):
     full. Made with its own uuid and sent by POST /api/juice/sync like a
     pallet: editable, the latest copy wins. bin_no is the number written on
     the weigh sheet (88, 89, ...), offered as the highest this season + 1 and
-    unique among the season's live bins. A full bin goes on a delivery note.
+    unique among its supplier's live bins of the season. A full bin goes on a delivery note.
     A crate record is a batch of crates (container "crate"), numbered on its
     own and counted, not weighed: count crates of full_kg each, no empty_kg,
     so net = count x full_kg. One from before batches has an empty_kg and a
@@ -362,5 +371,7 @@ class JuiceBin(SQLModel, table=True):
     changed_by_name: str = ""
     removed: bool = False
     bin_year: Optional[int] = None   # the season (farm-local year weighed), set once
+    supplier_id: Optional[int] = None   # whose fruit: Boord's supplier, set once, name copied like a pallet's.
+    supplier_name: str = ""             # Each supplier's bins and crates are numbered on their own
     device: str = ""
     synced_at: Optional[datetime] = None

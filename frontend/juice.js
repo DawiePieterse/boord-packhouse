@@ -15,6 +15,10 @@
 // renderOperatorBar from sulfur.js, $, esc from app.js, openNote and noteLabel
 // from deliverynote.js, and sameDay, sum,
 // kgText, nowIso, seasonOf, groupHead, groupRow and LIST_HEAD from consignment.js.
+//
+// One supplier at a time, like Pallet Stack (supplierBar, mine and
+// currentSupplier from consignment.js): a bin is its supplier's, and each
+// supplier's bins and crates are numbered on their own.
 
 let jc = { view: "list", draft: null };
 
@@ -27,7 +31,7 @@ const binsNewestFirst = () => Store.bins().sort((a, b) => (a.weighed_at < b.weig
 const containerOf = (b) => b.container || "bin"; // a copy made before crates is a bin
 const CONTAINER_NAME = { bin: "Bin", crate: "Crate" };
 const binName = (b) => `${CONTAINER_NAME[containerOf(b)]} ${b.bin_no}`;
-const seasonBins = (season, container) => Store.bins().filter((b) => seasonOf(b.weighed_at) === season && containerOf(b) === container);
+const seasonBins = (season, container) => Store.bins().filter((b) => mine(b) && seasonOf(b.weighed_at) === season && containerOf(b) === container);
 // The number runs on from the highest this season, as the weigh sheet does;
 // bins and crates each count on their own.
 function nextBinNo(container) {
@@ -63,7 +67,7 @@ const binSummary = (b) => `
 // weight or refused, whatever its day, so none is lost. Those still waiting
 // for a weight come first; in each part bins, then crates, highest number first.
 function binsView() {
-  const bins = Store.bins().filter((b) => sameDay(b.weighed_at) || !binFull(b) || b.error)
+  const bins = Store.bins().filter((b) => mine(b) && (sameDay(b.weighed_at) || !binFull(b) || b.error))
     .sort((a, b) => binFull(a) - binFull(b) || (containerOf(a) === "crate") - (containerOf(b) === "crate") || b.bin_no - a.bin_no);
   const rows = bins.map((b) => {
     const note = binNote(b.uuid);
@@ -75,6 +79,7 @@ function binsView() {
     </button>`;
   }).join("");
   return `
+    ${supplierBar()}
     <div class="bg-white rounded-2xl shadow p-4">
       <div class="grid grid-cols-2 gap-3">
         <button type="button" data-addbin="bin" class="boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-weight-scale"></i> New bin</button>
@@ -97,7 +102,7 @@ function binsView() {
 // today's, then the earlier ones this phone holds greyed. Tapping one opens
 // it there, and leaving it comes back here.
 function juiceNotesView() {
-  const notes = Store.notes().filter(isJuiceNote);
+  const notes = Store.notes().filter((n) => mine(n) && isJuiceNote(n));
   const today = (n) => sameDay(n.created_at) || n.error;
   return `
     <div class="bg-white rounded-2xl shadow px-4 pb-1">
@@ -144,7 +149,7 @@ function binForm() {
   return `
     <div class="flex items-center gap-3">
       <button type="button" data-back class="px-3 py-2 rounded-lg border border-slate-300 bg-white"><i class="fa-solid fa-arrow-left"></i></button>
-      <div class="flex-1"><div class="font-semibold">${d.bin ? esc(binName(d.bin)) : crate ? "New crate batch" : "New bin"}</div>
+      <div class="flex-1 min-w-0"><div class="font-semibold truncate">${d.bin ? esc(binName(d.bin)) : crate ? "New crate batch" : "New bin"}${Store.suppliers().length > 1 ? ` · ${esc(currentSupplier().name)}` : ""}</div>
         <div id="binNet" class="text-sm">${draftNetText(d)}</div></div>
     </div>
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
@@ -186,7 +191,9 @@ async function saveBin() {
   const note = d.bin && binNote(d.uuid);
   if (note && !crate && (empty == null || full == null)) return fail(`${binName(d.bin)} is on delivery note ${noteLabel(note)}: it needs both weights.`);
   const op = Operator.current() || {};
-  const base = d.bin || { kind: "juice_bin", weighed_at: nowIso(), made_by: op.id || "", made_by_name: op.name || "" };
+  const supplier = currentSupplier(); // a new bin is the supplier's whose list this is; it never changes
+  const base = d.bin || { kind: "juice_bin", weighed_at: nowIso(), made_by: op.id || "", made_by_name: op.name || "",
+                          supplier_id: supplier.id, supplier_name: supplier.name };
   await Store.saveRun({ ...base, kind: "juice_bin", uuid: d.uuid, container: d.container, count, bin_no: no, empty_kg: empty, full_kg: full,
                         changed_by: op.id || "", changed_by_name: op.name || "", removed: false, rev: Date.now() });
   jc.view = "list";
@@ -218,6 +225,7 @@ function onJuiceClick(ev) {
 }
 
 function onJuiceInput(ev) {
+  if (supplierPicked(ev)) { renderJuice(); return; }
   const f = ev.target.dataset.field;
   if (!f) return;
   const v = f === "no" || f === "count" ? ev.target.value.replace(/\D/g, "") : ev.target.value.replace(/[^\d.,]/g, "");

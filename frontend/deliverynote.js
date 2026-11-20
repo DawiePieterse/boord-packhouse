@@ -13,6 +13,11 @@
 // note keeps who made it and who last changed it. Uses Operator and
 // renderOperatorBar from sulfur.js, $, esc from app.js and palletSummary,
 // palletCartons, palletKg, kgText and sum from consignment.js.
+//
+// A note is one supplier's (the one picked at the top, supplierBar in
+// consignment.js): only that supplier's pallets or bins are offered, its
+// number runs in that supplier's own series, and it prints in that
+// supplier's name.
 
 // from: "juice" while a note opened from the Juice screen is open; leaving it goes back there.
 let dn = { view: "list", draft: null, from: null };
@@ -40,12 +45,15 @@ function dayAfter(v) {
 // The number is typed on the first note (carrying on from the paper book), and
 // every new note after it offers the last note number + 1: the server's (set
 // in Settings, or the highest it has had), or a note this phone has not sent yet.
-// Juice notes count on their own, from J-0001.
+// Juice notes count on their own, from J-0001, and each supplier has its own
+// two series (last_nos, by supplier id).
 const isJuiceNote = (n) => (n.bins || []).length > 0;
 function nextNoteNo(juice) {
-  const unsent = Store.notes().filter((n) => n.synced === 0 && isJuiceNote(n) === juice).map((n) => n.note_no);
+  const supplier = currentSupplier();
+  const unsent = Store.notes().filter((n) => n.synced === 0 && mine(n) && isJuiceNote(n) === juice).map((n) => n.note_no);
   const opts = Store.noteOptions();
-  const last = Math.max((juice ? opts.last_juice_no : opts.last_no) || 0, ...unsent);
+  const theirs = (opts.last_nos || {})[supplier.id] || (supplier.is_own_farm ? { no: opts.last_no, juice: opts.last_juice_no } : {});
+  const last = Math.max((juice ? theirs.juice : theirs.no) || 0, ...unsent);
   if (juice) return String(last + 1).padStart(4, "0");
   return last ? String(last + 1) : "";
 }
@@ -77,11 +85,13 @@ function notesView() {
     if (!fold) return groupHead(key, right) + group.map((n) => noteRow(n)).join("");
     return foldHead("notes", key, right) + (isOpen("notes", key) ? group.map((n) => noteRow(n, true)).join("") : "");
   }).join("");
-  const rows = grouped(Store.notes().filter(today));
+  const notes = Store.notes().filter(mine);
+  const rows = grouped(notes.filter(today));
   const season = seasonOf(nowIso());
-  const seasonNotes = Store.notes().filter((n) => seasonOf(n.created_at) === season && !today(n));
+  const seasonNotes = notes.filter((n) => seasonOf(n.created_at) === season && !today(n));
   const delivered = seasonNotes.flatMap((n) => n.pallets);
   return `
+    ${supplierBar()}
     <div class="bg-white rounded-2xl shadow p-4">
       <button type="button" data-addnote class="w-full boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-file-lines"></i> New delivery note</button>
     </div>
@@ -129,15 +139,15 @@ function noteRow(n, dim) {
 // the last juice note. Any other note holds pallets.
 function openNote(note, juice = false) {
   const opts = Store.noteOptions();
-  const last = juice && Store.notes().find(isJuiceNote) || {};
+  const last = juice && Store.notes().filter(mine).find(isJuiceNote) || {};
   dn.view = "note";
   dn.draft = note
-    ? { uuid: note.uuid, note, juice: isJuiceNote(note), no: isJuiceNote(note) ? String(note.note_no).padStart(4, "0") : String(note.note_no),
+    ? { uuid: note.uuid, note, supplier_id: supplierIdOf(note), juice: isJuiceNote(note), no: isJuiceNote(note) ? String(note.note_no).padStart(4, "0") : String(note.note_no),
         receiver_id: note.receiver_id, transporter_id: note.transporter_id,
         target_receiver_id: note.target_receiver_id == null ? null : note.target_receiver_id,
         seal_no: note.seal_no, cooled_to: note.cooled_to, loaded_on: note.loaded_on, offloaded_on: note.offloaded_on,
         picked: [...note.pallets, ...(note.bins || [])].map((p) => p.uuid) }
-    : { uuid: Boord.uuid(), note: null, juice, no: nextNoteNo(juice), receiver_id: last.receiver_id == null ? null : last.receiver_id,
+    : { uuid: Boord.uuid(), note: null, supplier_id: currentSupplier().id, juice, no: nextNoteNo(juice), receiver_id: last.receiver_id == null ? null : last.receiver_id,
         transporter_id: last.transporter_id == null ? null : last.transporter_id, target_receiver_id: null, seal_no: "",
         cooled_to: juice || opts.cooled_to == null ? "" : String(opts.cooled_to), loaded_on: dnToday(), offloaded_on: dayAfter(dnToday()), picked: [] };
   renderDeliveryNote();
@@ -156,10 +166,13 @@ const transporterChoices = (d) => withOwn(Store.noteOptions().transporters || []
   d.note && d.note.transporter_id != null && { id: d.note.transporter_id, name: d.note.transporter });
 
 // The pallets this note can hold: its own (the live copy if this phone has
-// one, else the note's), then every pallet on no other note, newest first.
+// one, else the note's), then every pallet of its supplier on no other note,
+// newest first.
+const ofNote = (d) => (r) => supplierIdOf(r) === d.supplier_id;
 function palletChoices(d) {
   const taken = new Set(Store.notes().filter((n) => n.uuid !== d.uuid).flatMap((n) => n.pallets.map((p) => p.uuid)));
-  const live = newestFirst().filter((p) => !taken.has(p.uuid) && !p.error);
+  const live = Store.pallets().filter(ofNote(d)).sort((a, b) => (a.scanned_at < b.scanned_at ? 1 : -1))
+    .filter((p) => !taken.has(p.uuid) && !p.error);
   const own = (d.note ? d.note.pallets : []).filter((p) => !live.some((l) => l.uuid === p.uuid));
   return [...own, ...live];
 }
@@ -168,7 +181,7 @@ function palletChoices(d) {
 // then every full one on no other note (one waiting for a weight never shows).
 function binChoices(d) {
   const taken = new Set(Store.notes().filter((n) => n.uuid !== d.uuid).flatMap((n) => (n.bins || []).map((b) => b.uuid)));
-  const live = binsNewestFirst().filter((b) => binFull(b) && !taken.has(b.uuid) && !b.error);
+  const live = binsNewestFirst().filter(ofNote(d)).filter((b) => binFull(b) && !taken.has(b.uuid) && !b.error);
   const own = (d.note ? d.note.bins || [] : []).filter((b) => !live.some((l) => l.uuid === b.uuid));
   return [...own, ...live];
 }
@@ -215,12 +228,13 @@ function noteForm() {
       <button type="button" data-back class="px-3 py-2 rounded-lg border border-slate-300 bg-white"><i class="fa-solid fa-arrow-left"></i></button>
       <div class="flex-1 min-w-0">
         <div class="font-semibold">${d.note ? `Delivery note ${esc(noteLabel(d.note))}` : d.juice ? "New Juice Delivery Note" : "New delivery note"}</div>
-        ${locked ? `<div class="text-sm font-semibold text-blue-800">${esc(d.juice ? "Juice" : noteMarkets({ pallets: picked }))}</div>` : ""}
+        <div class="text-sm font-semibold text-blue-800 truncate empty:hidden">${esc([Store.suppliers().length > 1 && draftSupplier(d).name,
+          locked && (d.juice ? "Juice" : noteMarkets({ pallets: picked }))].filter(Boolean).join(" · "))}</div>
       </div>
     </div>
     <div class="bg-white rounded-2xl shadow p-4 space-y-3">
       <div class="flex gap-2">
-        ${label(`Note no (${d.juice ? "J" : notePrefix(picked)}-)`, input("no", `inputmode="numeric" maxlength="6" placeholder="${d.juice ? "0001" : "1335"}"`), "w-28 shrink-0")}
+        ${label(`Note no (${d.juice ? `${supplierPrefix(draftSupplier(d))}J` : notePrefix(picked, draftSupplier(d))}-)`, input("no", `inputmode="numeric" maxlength="6" placeholder="${d.juice ? "0001" : "1335"}"`), "w-28 shrink-0")}
         ${label("Transporter", select("transporter", transporterChoices(d), d.transporter_id, "Transporter...", (r) => r.name), "flex-1 min-w-0")}
       </div>
       ${label("Receiver", select("receiver", receiverChoices(d), d.receiver_id, "Receiver...", (r) => (r.text || receiverText(r)).split("\n").join(" · ")))}
@@ -353,7 +367,7 @@ async function saveNote() {
   const pallets = palletChoices(d).filter((p) => d.picked.includes(p.uuid));
   const bins = binChoices(d).filter((b) => d.picked.includes(b.uuid));
   if (!(no >= 1)) return fail("Type the note number.");
-  const twin = Store.notes().find((n) => n.note_no === no && n.uuid !== d.uuid && isJuiceNote(n) === d.juice);
+  const twin = Store.notes().find((n) => n.note_no === no && n.uuid !== d.uuid && isJuiceNote(n) === d.juice && ofNote(d)(n));
   if (twin) return fail(`Note ${noteLabel(twin)} is already used.`);
   if (!receiver) return fail("Pick the receiver.");
   if (!transporter) return fail("Pick the transporter.");
@@ -367,7 +381,7 @@ async function saveNote() {
   const op = Operator.current() || {};
   const base = d.note || { kind: "delivery_note", created_at: new Date(Store.now()).toISOString(),
                            made_by: op.id || "", made_by_name: op.name || "" };
-  await Store.saveRun({ ...base, kind: "delivery_note", uuid: d.uuid, note_no: no,
+  await Store.saveRun({ ...base, kind: "delivery_note", uuid: d.uuid, note_no: no, supplier_id: d.supplier_id,
                         receiver_id: receiver.id, receiver: receiver.text || receiverText(receiver),
                         transporter_id: transporter.id, transporter: transporter.name,
                         target_receiver_id: target ? target.id : null, target_receiver: target ? target.text || targetText(target) : "",
@@ -395,15 +409,31 @@ function removeNote() {
 const noteGroup = (n) => ((n.bins || []).length ? "juice" : n.pallets.length ? marketGroup(n.pallets[0].market_name) : "local");
 const noteMarkets = (n) => [...new Set(n.pallets.map((p) => p.market_name).filter(Boolean))].join(", ") || groupTitle(noteGroup(n));
 
-// The note number's prefix: LW for a delivery of export (USA or EU)
-// pallets, B for local; one series of numbers. A juice note has its own
-// series, J-0001 on. As export_forms.note_label.
-function notePrefix(pallets) {
-  return (pallets || []).some((p) => marketGroup(p.market_name) !== "local") ? "LW" : "B";
+// The supplier a note prints as: the server's copy of Boord's supplier from
+// when the note was saved, else (a note not sent yet, or one from before
+// v0.73) the supplier in this phone's list.
+function noteSupplier(n) {
+  if (n.supplier && n.supplier.id != null) return n.supplier;
+  const id = supplierIdOf(n);
+  return Store.suppliers().find((s) => s.id === id) || { id, name: "", is_own_farm: id == null };
+}
+// The same for the note being filled in.
+const draftSupplier = (d) => (d.note ? noteSupplier(d.note) : noteSupplier({ supplier_id: d.supplier_id }));
+// A supplier's own prefix (Boord's supplier row), else S and its id; none for
+// the farm's own, which keeps LW, B and J.
+const supplierPrefix = (s) => (s.note_prefix || "").trim() || (s.is_own_farm ? "" : `S${s.id}`);
+
+// The note number's prefix. The farm's own: LW for a delivery of export (USA
+// or EU) pallets, B for local, one series of numbers, and a juice note its
+// own series, J-0001 on. Another supplier: its prefix, JB-12, and JBJ-0001
+// for juice, two series of its own. As export_forms.note_label.
+function notePrefix(pallets, supplier) {
+  return supplierPrefix(supplier) || ((pallets || []).some((p) => marketGroup(p.market_name) !== "local") ? "LW" : "B");
 }
 
 function noteLabel(n) {
-  return isJuiceNote(n) ? `J-${String(n.note_no).padStart(4, "0")}` : `${notePrefix(n.pallets)}-${n.note_no}`;
+  const supplier = noteSupplier(n);
+  return isJuiceNote(n) ? `${supplierPrefix(supplier)}J-${String(n.note_no).padStart(4, "0")}` : `${notePrefix(n.pallets, supplier)}-${n.note_no}`;
 }
 
 // A note of export pallets has their market's papers (USA: phyto,
@@ -473,6 +503,7 @@ function onDeliveryClick(ev) {
 }
 
 function onDeliveryInput(ev) {
+  if (supplierPicked(ev)) { renderDeliveryNote(); return; }
   const f = ev.target.dataset.field;
   if (!f) return;
   const v = ev.target.value;

@@ -12,6 +12,12 @@
 // screen: a pallet keeps who scanned it in and who last changed it. Uses
 // Operator and renderOperatorBar from sulfur.js, $, esc from app.js and
 // Html5Qrcode from shared/vendor.
+//
+// One supplier at a time: the pack house packs for other growers too, and
+// each one's pallets, juice bins and delivery notes are kept apart, numbered
+// on their own, and go out on that supplier's own papers. The supplier is
+// picked at the top of this screen, Delivery Note and Juice (supplierBar), one
+// choice for all three, kept on this phone, the farm's own to start with.
 
 let cn = { view: "list", draft: null };
 let palletScanner = null;
@@ -25,10 +31,52 @@ function twiceInARow() {
   return (text) => { const same = text === last; last = text; return same; };
 }
 
+// ---- The supplier being worked on -------------------------------------------
+
+const SUPPLIER_KEY = "ph_supplier";
+const ownSupplier = () => Store.suppliers().find((s) => s.is_own_farm) || null;
+function currentSupplier() {
+  let id = null;
+  try { id = Number(localStorage.getItem(SUPPLIER_KEY)) || null; } catch (_) { /* private mode */ }
+  const all = Store.suppliers();
+  // The one picked, if Boord still has it; else the farm's own. A phone that
+  // has never reached the server has no list yet, and nothing to show either.
+  return all.find((s) => s.id === id) || ownSupplier() || all[0] || { id: null, name: "" };
+}
+function pickSupplier(id) {
+  try { localStorage.setItem(SUPPLIER_KEY, String(id)); } catch (_) { /* private mode */ }
+}
+// Whose a pallet, bin or note is. One that does not say (made before they
+// were kept per supplier, v0.73) is the farm's own.
+const supplierIdOf = (r) => (r.supplier_id == null ? (ownSupplier() || { id: null }).id : r.supplier_id);
+const mine = (r) => supplierIdOf(r) === currentSupplier().id;
+
+// The picker at the top of the three lists. With only the farm's own supplier
+// in Boord there is nothing to pick, and it stays away.
+function supplierBar() {
+  const all = Store.suppliers();
+  if (all.length < 2) return "";
+  const cur = currentSupplier();
+  return `
+    <label class="bg-white rounded-2xl shadow px-4 py-3 flex items-center gap-3">
+      <span class="text-sm font-semibold text-slate-600 shrink-0"><i class="fa-solid fa-truck"></i> Supplier</span>
+      <select data-supplierpick class="flex-1 min-w-0 border border-slate-300 rounded-lg px-2 py-2.5 text-lg font-bold">
+        ${all.map((s) => `<option value="${esc(s.id)}"${s.id === cur.id ? " selected" : ""}>${esc(s.name)}</option>`).join("")}
+      </select>
+    </label>`;
+}
+// A screen's input handler passes its events here first: true when it was the picker.
+function supplierPicked(ev) {
+  if (!("supplierpick" in ev.target.dataset)) return false;
+  pickSupplier(Number(ev.target.value));
+  return true;
+}
+
 // The pallet number is typed once and then runs on: 001, 002... (or from 100).
-// Unique for the season (the calendar year it was scanned in) across every stack.
+// Unique for the season (the calendar year it was scanned in) across every
+// stack, among the supplier's own pallets: each supplier's are numbered apart.
 const seasonOf = (iso) => new Date(iso).getFullYear();
-const seasonPallets = (season) => Store.pallets().filter((p) => seasonOf(p.scanned_at) === season);
+const seasonPallets = (season) => Store.pallets().filter((p) => mine(p) && seasonOf(p.scanned_at) === season);
 function nextRef() {
   const used = seasonPallets(seasonOf(nowIso())).map((p) => Number(p.pallet_ref)).filter((n) => n >= 1);
   return String(Math.min(999, (used.length ? Math.max(...used) : 0) + 1)).padStart(3, "0");
@@ -38,7 +86,8 @@ const sum = (rows, f) => rows.reduce((n, r) => n + f(r), 0);
 const palletCartons = (p) => sum(p.lines, (l) => l.cartons);
 const palletKg = (p) => sum(p.lines, (l) => l.cartons * l.carton_kg);
 const kgText = (kg) => `${kg.toLocaleString("en-ZA", { maximumFractionDigits: 1 })} kg`;
-const newestFirst = () => Store.pallets().sort((a, b) => (a.scanned_at < b.scanned_at ? 1 : -1));
+// The supplier's pallets, newest first.
+const newestFirst = () => Store.pallets().filter(mine).sort((a, b) => (a.scanned_at < b.scanned_at ? 1 : -1));
 
 function renderConsignment() {
   if (cn.view !== "pallet") stopPalletScan();
@@ -64,6 +113,7 @@ function palletsView() {
     </button>`).join("");
   }).join("");
   return `
+    ${supplierBar()}
     <div class="bg-white rounded-2xl shadow p-4">
       <button type="button" data-add class="w-full boord-btn-primary rounded-xl py-5 text-xl font-bold"><i class="fa-solid fa-barcode"></i> Add a new pallet</button>
     </div>
@@ -202,7 +252,7 @@ const palletSummary = (p) => `
 
 // ---- A pallet: scan its label, then what is on it ---------------------------
 
-// What this phone last saved (supplier, market, carton type, block): a new
+// What this phone last saved (market, carton type, block): a new
 // pallet starts from it. Only a convenience, so a missing copy is no harm.
 const LAST_USED = "ph_pallet_last";
 function lastUsed() {
@@ -211,8 +261,7 @@ function lastUsed() {
 function rememberUsed(d, lines) {
   const l = lines[lines.length - 1];
   try {
-    localStorage.setItem(LAST_USED, JSON.stringify({ supplier_id: d.supplier_id, market_id: d.market_id,
-                                                     packaging_id: l.packaging_id, block_id: l.block_id || "" }));
+    localStorage.setItem(LAST_USED, JSON.stringify({ market_id: d.market_id, packaging_id: l.packaging_id, block_id: l.block_id || "" }));
   } catch (_) { /* private mode */ }
 }
 // A remembered id only if it is still on offer: a retired carton or market is not picked for you.
@@ -225,13 +274,13 @@ function openPallet(pallet) {
                  supplier_id: pallet.supplier_id, market_id: pallet.market_id,
                  lines: pallet.lines.map((l) => ({ packaging_id: l.packaging_id, cartons: l.cartons, block_id: l.block_id || "" })) };
   } else {
-    // The values this phone last used, else those of the newest pallet.
+    // The values this phone last used, else those of the newest pallet. It is
+    // the supplier's whose list this is: picked at the top, not on the pallet.
     const newest = newestFirst()[0] || {};
     const line = (newest.lines || []).slice(-1)[0] || {};
-    const last = { supplier_id: newest.supplier_id, market_id: newest.market_id, packaging_id: line.packaging_id,
-                   block_id: line.block_id, ...lastUsed() };
+    const last = { market_id: newest.market_id, packaging_id: line.packaging_id, block_id: line.block_id, ...lastUsed() };
     cn.draft = { uuid: Boord.uuid(), pallet: null, barcode: "", ref: nextRef(),
-                 supplier_id: stillOffered(Store.suppliers(), last.supplier_id), market_id: stillOffered(Store.markets(), last.market_id),
+                 supplier_id: currentSupplier().id, market_id: stillOffered(Store.markets(), last.market_id),
                  lines: [{ packaging_id: stillOffered(Store.packaging(), last.packaging_id), cartons: "", block_id: last.block_id || "" }] };
   }
   renderConsignment();
@@ -308,7 +357,7 @@ function palletForm() {
   return `
     <div class="flex items-center gap-3">
       <button type="button" data-cancel class="px-3 py-2 rounded-lg border border-slate-300 bg-white"><i class="fa-solid fa-arrow-left"></i></button>
-      <div class="flex-1"><div class="font-semibold">${d.pallet ? `Pallet ${esc(d.pallet.pallet_ref || "")}` : "New pallet"}</div>
+      <div class="flex-1 min-w-0"><div class="font-semibold truncate">${d.pallet ? `Pallet ${esc(d.pallet.pallet_ref || "")}` : "New pallet"}${Store.suppliers().length > 1 ? ` · ${esc((supplierChoices(d).find((s) => s.id === d.supplier_id) || {}).name || "")}` : ""}</div>
         <div id="palletTotal" class="text-sm">${totalText(draftLines(d))}</div></div>
       <div class="font-semibold" title="Date code">${esc(palletDateCode(d.pallet))}</div>
     </div>
@@ -320,8 +369,6 @@ function palletForm() {
       <div class="flex gap-2">
         <label class="w-16 shrink-0"><span class="text-xs font-semibold text-slate-600">Pallet no</span>
           <input data-field="ref" value="${esc(d.ref)}" inputmode="numeric" maxlength="3" pattern="[0-9]{3}" placeholder="001" class="w-full ${field}"></label>
-        <label class="flex-1 min-w-0"><span class="text-xs font-semibold text-slate-600">Supplier</span>
-          <select data-field="supplier" class="w-full ${field}">${options(supplierChoices(d), d.supplier_id, "Supplier...")}</select></label>
         <label class="flex-1 min-w-0"><span class="text-xs font-semibold text-slate-600">Market</span>
           <select data-field="market" class="w-full ${field}">${options(marketChoices(d), d.market_id, "Market...")}</select></label>
       </div>
@@ -415,7 +462,7 @@ async function savePallet() {
   const market = marketChoices(d).find((m) => m.id === d.market_id);
   const fail = (m) => { $("palletScanMsg").textContent = m; };
   if (!/^\d{3}$/.test(d.ref)) return fail("The pallet number is 3 digits, like 001.");
-  if (!supplier) return fail("Pick the supplier.");
+  if (!supplier) return fail("No supplier yet: this needs the server once, to fetch Boord's suppliers.");
   if (!market) return fail("Pick the market.");
   if (!barcode) return fail("Scan the pallet label first.");
   const twin = seasonPallets(d.pallet ? seasonOf(d.pallet.scanned_at) : seasonOf(nowIso())).find((p) => p.pallet_ref === d.ref && p.uuid !== d.uuid);
@@ -477,12 +524,13 @@ function onConsignmentClick(ev) {
 }
 
 function onConsignmentInput(ev) {
+  if (supplierPicked(ev)) { renderConsignment(); return; }
   const f = ev.target.dataset.field;
   const v = ev.target.value;
   if (!f) return;
   if (f === "barcode") { cn.draft.barcode = v; return; }
   if (f === "ref") { cn.draft.ref = v.replace(/\D/g, "").slice(0, 3); ev.target.value = cn.draft.ref; return; }
-  if (f === "supplier" || f === "market") { cn.draft[`${f}_id`] = v ? Number(v) : null; return; }
+  if (f === "market") { cn.draft.market_id = v ? Number(v) : null; return; }
   const line = cn.draft.lines[Number(ev.target.closest("[data-line]").dataset.line)];
   if (f === "pack") line.packaging_id = v ? Number(v) : null;
   else if (f === "lineblock") line.block_id = v;
