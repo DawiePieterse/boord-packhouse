@@ -24,7 +24,13 @@ from datetime import date, datetime
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-PUC = "D2087"
+# The farm's own details, as its paper delivery note and the department's
+# workbook have them printed. They are what the farm's own notes carry until
+# its supplier row in Boord (Admin -> Master Data -> Suppliers) holds its own;
+# every other supplier's come only from Boord.
+OWN = {"name": "Bekfontein Boerdery", "reg_number": "(EDMS) BPK    Reg Nr 1992/002298/07",
+       "contact": "Tel: 083 627 6926\nOffice: 083 762 1395\nEmail: andre@laughw.co.za",
+       "address": "POSBUS 1290\nMALELANE\n1320", "puc": "D2087", "ggn": "4050373828202"}
 SIZES = ("XXXL", "XXL", "XL", "L", "M", "S", "MIX")
 TEMPLATE = Path(__file__).resolve().parent / "templates" / "export_forms.xlsx"
 PHYTO = (("Phyto (1)", range(27, 40)), ("Phyto (2)", range(27, 35)))  # its pallet rows the consignment note carries on
@@ -43,15 +49,40 @@ def market_group(name: str) -> str:
     return hit.group(1).lower() if hit else "local"
 
 
+def sender(n) -> dict:
+    """Whose note it is, as its documents print it: name, registration line,
+    contact lines, postal address, PUC, GGN and the prefix of its note
+    numbers. From the note's own copy of Boord's supplier row, taken when it
+    was saved. The farm's own (and any note from before notes had a supplier)
+    falls back, field by field, on what was always printed for it (OWN);
+    another supplier with no name for its documents prints its Boord name,
+    and with no prefix S and its Boord id."""
+    s = json.loads(getattr(n, "supplier", None) or "{}")
+    own = not s or bool(s.get("is_own_farm"))
+    held = {"name": s.get("document_name"), **{k: s.get(k) for k in ("reg_number", "contact", "address", "puc", "ggn")}}
+    out = {k: (held[k] or "").strip() or (OWN[k] if own else "") for k in OWN}
+    if not out["name"]:
+        out["name"] = s.get("name") or f"Supplier {s.get('id')}"
+    out["puc"] = re.sub(r"\s+", "", out["puc"])  # D2087, however it was typed
+    out["prefix"] = (s.get("note_prefix") or "").strip() or ("" if own else f"S{s.get('id')}")
+    return out
+
+
+def is_export(n) -> bool:
+    """A note of USA or EU pallets: it goes out on its market's papers."""
+    return any(EXPORT_MARKET.search(p.get("market_name") or "") for p in json.loads(n.pallets or "[]"))
+
+
 def note_label(n) -> str:
-    """The note's number as printed: LW-1335 when it carries export (USA or EU)
-    pallets, else B-1335 (local): one series of numbers, only the prefix differs.
-    A juice note has its own series, J-0001 on."""
-    export = any(EXPORT_MARKET.search(p.get("market_name") or "") for p in json.loads(n.pallets or "[]"))
-    juice = json.loads(getattr(n, "bins", None) or "[]")
-    if juice:
-        return f"J-{n.note_no:04d}"
-    return f"{'LW' if export else 'B'}-{n.note_no}"
+    """The note's number as printed. The farm's own: LW-1335 when it carries
+    export (USA or EU) pallets, else B-1335 (local), one series of numbers with
+    only the prefix differing, and its juice notes a series of their own,
+    J-0001 on. A supplier with a prefix (Boord's supplier row, else S and its
+    id) has its own two series: JB-12 for pallets, JBJ-0001 for juice."""
+    prefix = sender(n)["prefix"]
+    if json.loads(getattr(n, "bins", None) or "[]"):
+        return f"{prefix}J-{n.note_no:04d}"
+    return f"{prefix or ('LW' if is_export(n) else 'B')}-{n.note_no}"
 
 
 def pallet_code(code: str) -> str:
@@ -109,7 +140,7 @@ def _facts(n, market: str):
         raise TooManyLines(f"The department's forms hold {MAX_LINES} pallet lines and this note has {len(rows)}: "
                            "split it over two notes.")
     # The number as the farm writes it on the department's forms: LW 2300.
-    return {"rows": rows, "doc_no": note_label(n).replace("-", " "), "market": market,
+    return {"rows": rows, "doc_no": note_label(n).replace("-", " "), "market": market, "sender": sender(n),
             "day": date.fromisoformat(n.loaded_on) if n.loaded_on else None,
             "varieties": ", ".join(sorted({r["variety"] for r in rows if r["variety"]})),
             "receiver": [line.strip() for line in n.receiver.split("\n") if line.strip()][:6]}
@@ -121,16 +152,20 @@ def _phyto(f, page: int) -> dict:
     first = sum(len(rows) for _, rows in PHYTO[:page])
     rows = PHYTO[page][1]
     mine = f["rows"][first:first + len(rows)]
+    who = f["sender"]
+    spaced = re.sub(r"^([A-Za-z]+)(\d)", r"\1 \2", who["puc"])  # D 2087, as this column has it
     c = {"C5": f["doc_no"], "I9": f["day"]}
+    if who["name"] != OWN["name"]:  # the producer; the farm's own is the template's
+        c["C15"] = who["name"]
     for r in range(18, 23):  # the intake documents: one line, this note
         c.update({f"{col}{r}": None for col in "HJKL"})
     cartons, pallets = sum(x["cartons"] for x in mine), len({x["pallet"] for x in mine})
     if mine:
-        c.update({"H19": f["doc_no"], "J19": PUC, "K19": cartons, "L19": pallets})
+        c.update({"H19": f["doc_no"], "J19": who["puc"], "K19": cartons, "L19": pallets})
     c.update({"K23": cartons if mine else None, "L23": pallets if mine else None})
     for i, r in enumerate(range(27, 37 if page else 40)):  # every row the page has, the empty ones cleared
         x = mine[i] if i < len(mine) else None
-        values = (first + i + 1, x["pallet_id"], "D 2087", x["variety"], _num(x["block"]), x["cartons"],
+        values = (first + i + 1, x["pallet_id"], spaced, x["variety"], _num(x["block"]), x["cartons"],
                   _num(x["date_code"]), x["count"], _num(x["pallet_no"])) if x else (None,) * 9
         c.update({f"{col}{r}": v for col, v in zip(("A", "B", "H", "I", "J", "K", "L", "M", "N"), values)})
     return c
@@ -139,6 +174,15 @@ def _phyto(f, page: int) -> dict:
 def _consignment(f) -> dict:
     receiver = f["receiver"] + [None] * 6
     c = {f"F{r}": receiver[i] for i, r in enumerate(range(2, 8))}
+    # The producer: this supplier's PUC and GGN, and its name and address when
+    # they are not the farm's own, which the template has. The PHC, the
+    # inspection point and the exporter stay the pack house's.
+    who = f["sender"]
+    c.update({"J3": f"PUC Code : {who['puc']}", "J5": f"GGN Nr     : {who['ggn']}" if who["ggn"] else None})
+    if not who["ggn"]:
+        c["J6"] = None  # "GlobalG.A.P. Certified"
+    if who["name"] != OWN["name"]:
+        c.update({"C2": who["name"], "C4": ", ".join(x.strip() for x in who["address"].split("\n") if x.strip()) or None})
     c.update({"K2": f["doc_no"], "K3": None, "C6": f["day"], "K8": f["market"], "C33": f["day"], "J34": None,
               "K35": None, "K32": sum(x["cartons"] for x in f["rows"])})
     for i, r in enumerate(range(11, 32)):
@@ -151,7 +195,7 @@ def _consignment(f) -> dict:
 
 def _inspection(f, page: int) -> dict:
     mine = f["rows"][11 * page:11 * page + 11]
-    c = {"E9": f["receiver"][0] if f["receiver"] else None, "H10": "DATE:", "K10": f["day"],
+    c = {"E9": f["receiver"][0] if f["receiver"] else None, "H10": "DATE:", "K10": f["day"], "O9": f"PUC : {f['sender']['puc']}",
          "C11": f"CULTIVAR:  {f['varieties']}", "B12": f["doc_no"]}
     for i in range(11):
         x = mine[i] if i < len(mine) else None

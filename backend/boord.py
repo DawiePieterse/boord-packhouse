@@ -43,11 +43,38 @@ def workers() -> list:
              "photo": f"/photos/{r.photo_filename}" if r.photo_filename else ""} for r in rows]
 
 
+# What this app prints for a supplier on its delivery notes and export papers,
+# and the Boord column each comes from (Boord Admin -> Master Data ->
+# Suppliers; the last five since Boord 3.67). Read when Boord has the column
+# and blank when it has not, and on purpose not in BOORD_SCHEMA_CHECK: this
+# release installed a night before Boord's must still boot, and then simply
+# prints the farm's own details as it always has (export_forms.sender).
+SUPPLIER_DETAILS = {"puc": "puc", "ggn": "global_gap_number", "document_name": "document_name",
+                    "reg_number": "reg_number", "contact": "document_contact", "address": "document_address",
+                    "note_prefix": "note_prefix"}
+
+
 def suppliers() -> list:
-    """Every Boord supplier, the farm's own first: the consignment's supplier list."""
+    """Every Boord supplier, the farm's own first, each with the details its
+    documents carry: the supplier picker on Pallet Stack, Delivery Note and
+    Juice, and what a delivery note copies when it is saved."""
     with boord_engine.connect() as conn:
-        rows = conn.execute(text("SELECT id, name, is_own_farm FROM supplier ORDER BY is_own_farm DESC, name")).all()
-    return [{"id": r.id, "name": r.name or f"Supplier {r.id}", "is_own_farm": bool(r.is_own_farm)} for r in rows]
+        have = {r[1] for r in conn.execute(text("PRAGMA table_info(supplier)"))}
+        extra = "".join(f", {col} AS {key}" for key, col in SUPPLIER_DETAILS.items() if col in have)
+        rows = conn.execute(text(f"SELECT id, name, is_own_farm{extra} FROM supplier "
+                                 "ORDER BY is_own_farm DESC, name")).mappings().all()
+    return [{"id": r["id"], "name": r["name"] or f"Supplier {r['id']}", "is_own_farm": bool(r["is_own_farm"]),
+             **{key: (r.get(key) or "").strip() for key in SUPPLIER_DETAILS}} for r in rows]
+
+
+def supplier(supplier_id) -> Optional[dict]:
+    return next((s for s in suppliers() if s["id"] == supplier_id), None)
+
+
+def own_supplier_id() -> Optional[int]:
+    """The farm's own supplier row: whose a pallet, bin or note is when it
+    does not say (one made before they were kept per supplier, v0.73)."""
+    return next((s["id"] for s in suppliers() if s["is_own_farm"]), None)
 
 
 def fruit_sources(now: Optional[datetime] = None) -> list:

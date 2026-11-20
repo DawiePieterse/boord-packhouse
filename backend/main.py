@@ -15,11 +15,12 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
+import boord
 import config
 import tunnel_gate
 from backup import start_backup_scheduler
 from boord import BOORD_SCHEMA_CHECK
-from db import boord_engine, init_packhouse_db
+from db import boord_engine, init_packhouse_db, packhouse_engine
 from routers import acid, admin, backups, baths, consignment, consignment_settings, delivery_note, delivery_settings, floor, juice, sulfur, sulfur_report, tents, version, weather
 
 app = FastAPI(title="Boord Packhouse")
@@ -78,10 +79,24 @@ def _wait_for_boord() -> None:
             time.sleep(BOORD_RETRY_S)
 
 
+def _own_the_unowned() -> None:
+    """Delivery notes and juice bins from before they were kept per supplier
+    (v0.73) are the farm's own: every one printed as Bekfontein's. Which
+    supplier that is lives in Boord's database, so this runs here, each
+    startup, and not in the migration; once done it finds nothing to do."""
+    own = boord.own_supplier_id()
+    if own is None:
+        return
+    with packhouse_engine.begin() as conn:
+        for table in ("deliverynote", "juicebin"):
+            conn.execute(text(f"UPDATE {table} SET supplier_id = :own WHERE supplier_id IS NULL"), {"own": own})
+
+
 @app.on_event("startup")
 def on_startup():
     _wait_for_boord()
     init_packhouse_db()
+    _own_the_unowned()
     start_backup_scheduler()
 
 

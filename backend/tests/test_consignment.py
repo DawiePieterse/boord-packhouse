@@ -75,8 +75,10 @@ def test_bad_pallets_are_rejected_not_stored(client, bad):
 
 
 def test_suppliers_come_from_boord_own_farm_first(client):
-    assert client.get("/api/suppliers").json() == [
-        {"id": 1, "name": "Own fruit", "is_own_farm": True}, {"id": 2, "name": "Jansen Boerdery", "is_own_farm": False}]
+    # The fake Boord is one from before its suppliers carried document details: all blank.
+    assert [{k: s[k] for k in ("id", "name", "is_own_farm", "puc", "note_prefix")} for s in client.get("/api/suppliers").json()] == [
+        {"id": 1, "name": "Own fruit", "is_own_farm": True, "puc": "", "note_prefix": ""},
+        {"id": 2, "name": "Jansen Boerdery", "is_own_farm": False, "puc": "", "note_prefix": ""}]
 
 
 def test_pallet_number_is_unique_for_the_season_across_stacks(client):
