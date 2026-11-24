@@ -18,7 +18,9 @@ def list_workers():
 
 @router.get("/suppliers")
 def list_suppliers():
-    return boord.suppliers()
+    """Boord's suppliers, each with its orchard blocks (for a pallet line's Block picker)."""
+    blocks = boord.supplier_blocks()
+    return [{**s, "blocks": blocks.get(s["id"], [])} for s in boord.suppliers()]
 
 
 @router.get("/fruit-sources")

@@ -71,6 +71,26 @@ def supplier(supplier_id) -> Optional[dict]:
     return next((s for s in suppliers() if s["id"] == supplier_id), None)
 
 
+def supplier_blocks() -> dict:
+    """Each supplier's orchard blocks in Boord (Admin -> Master Data -> Blocks,
+    a block's Supplier), by supplier id; a block with no supplier is the
+    farm's own. What a pallet line's Block picker offers for another supplier,
+    whose fruit often comes in without picking slips to read its blocks from.
+    block.supplier_id and block.active are read when Boord has them, like the
+    suppliers' details: without supplier_id every block is the farm's own."""
+    own = own_supplier_id()
+    with boord_engine.connect() as conn:
+        have = {r[1] for r in conn.execute(text("PRAGMA table_info(block)"))}
+        whose = "supplier_id" if "supplier_id" in have else "NULL"
+        live = "WHERE active = 1" if "active" in have else ""
+        rows = conn.execute(text(f"SELECT id, name, variety, {whose} AS supplier_id FROM block {live} ORDER BY id")).all()
+    out = {}
+    for r in rows:
+        out.setdefault(own if r.supplier_id is None else r.supplier_id, []).append(
+            {"block_id": r.id, "block_name": r.name or f"Block {r.id}", "variety": r.variety or ""})
+    return out
+
+
 def own_supplier_id() -> Optional[int]:
     """The farm's own supplier row: whose a pallet, bin or note is when it
     does not say (one made before they were kept per supplier, v0.73)."""
@@ -88,9 +108,12 @@ def fruit_sources(now: Optional[datetime] = None) -> list:
             {"key": "supplier:2", "supplier_id": 2, "supplier_name": "Jansen Boerdery",
              "crates": 80}]}, ...]
 
-    Days are farm-local calendar days. Own-farm blocks come from the crates'
-    harvest records; another farmer's lot has none, so it is offered by
-    supplier. Crates are Boord's field picking crates (about 7 kg on the
+    Days are farm-local calendar days. Blocks come from the crates' harvest
+    records. Another farmer's lot logged at receiving has none, so it is
+    offered by supplier; one picked on a field tablet allocated to that
+    supplier has them, and its blocks are listed too, each with owner_id and
+    owner_name (the lot's supplier; a block without them is the farm's own),
+    so a pallet line offers only its own supplier's blocks. Crates are Boord's field picking crates (about 7 kg on the
     farm), not the ~20 kg packhouse crates that go into a tent, so no weight
     is offered here: the suggested time uses Settings -> Sulfur's crate weight.
     """
@@ -119,10 +142,18 @@ def fruit_sources(now: Optional[datetime] = None) -> list:
 
         groups = []
         for day in wanted:
-            own = [l.id for l in by_day[day] if l.is_own_farm or l.supplier_id is None]
+            # The farm's own lots first (owner None), then each other supplier's.
+            owners = {None: [l.id for l in by_day[day] if l.is_own_farm or l.supplier_id is None]}
+            names = {}
+            for l in by_day[day]:
+                if l.supplier_id is not None and not l.is_own_farm:
+                    owners.setdefault(l.supplier_id, []).append(l.id)
+                    names[l.supplier_id] = l.supplier_name or f"Supplier {l.supplier_id}"
             sources = []
-            if own:
-                params = {f"l{i}": lot_id for i, lot_id in enumerate(own)}
+            for owner, lot_ids in owners.items():
+                if not lot_ids:
+                    continue
+                params = {f"l{i}": lot_id for i, lot_id in enumerate(lot_ids)}
                 placeholders = ", ".join(f":{k}" for k in params)
                 for b in conn.execute(text(
                         "SELECT harvestrecord.block_id, block.name, block.variety, COUNT(*) AS crates "
@@ -131,9 +162,12 @@ def fruit_sources(now: Optional[datetime] = None) -> list:
                         "AND harvestrecord.block_id IS NOT NULL "
                         "GROUP BY harvestrecord.block_id, block.name, block.variety "
                         "ORDER BY harvestrecord.block_id"), params).all():
-                    sources.append({"key": f"block:{b.block_id}", "block_id": b.block_id,
-                                    "block_name": b.name or f"Block {b.block_id}",
-                                    "variety": b.variety or "", "crates": b.crates})
+                    source = {"key": f"block:{b.block_id}", "block_id": b.block_id,
+                              "block_name": b.name or f"Block {b.block_id}",
+                              "variety": b.variety or "", "crates": b.crates}
+                    if owner is not None:
+                        source.update(owner_id=owner, owner_name=names[owner])
+                    sources.append(source)
             others = {}
             for l in by_day[day]:
                 if l.supplier_id is not None and not l.is_own_farm:
