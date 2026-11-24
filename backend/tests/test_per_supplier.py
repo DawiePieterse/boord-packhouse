@@ -130,3 +130,37 @@ def test_notes_and_bins_from_before_are_the_farms_own(client):
     main._own_the_unowned()
     assert notes(client)[0]["supplier_id"] == 1 and bins(client)[0]["supplier_id"] == 1
     assert client.get("/api/deliverynote/n1/usa_forms.xlsx").status_code == 200  # still LW-, the farm's own
+
+
+@pytest.fixture
+def jansen_blocks():
+    """Boord as the farm has it: blocks belong to a supplier, and one of
+    Jansen's lots was picked on a tablet, so it has harvest records."""
+    con = sqlite3.connect(os.environ["BOORD_DB_PATH"])
+    con.execute("ALTER TABLE block ADD COLUMN supplier_id INTEGER")
+    con.execute("ALTER TABLE block ADD COLUMN active BOOLEAN NOT NULL DEFAULT 1")
+    con.execute("INSERT INTO block VALUES ('J1', 'Jansen 1', 'Mauritius', 2, 1), ('J2', 'Jansen 2', 'Mauritius', 2, 1), "
+                "('J3', 'Uitgehaal', '', 2, 0)")
+    con.execute("INSERT INTO harvestrecord VALUES ('hj1', 2, 'J1'), ('hj2', 2, 'J1')")
+    con.commit()
+    yield
+    con.execute("DELETE FROM harvestrecord WHERE uuid IN ('hj1', 'hj2')")
+    con.execute("DELETE FROM block WHERE id IN ('J1', 'J2', 'J3')")
+    con.execute("ALTER TABLE block DROP COLUMN active")
+    con.execute("ALTER TABLE block DROP COLUMN supplier_id")
+    con.commit()
+    con.close()
+
+
+def test_a_supplier_is_offered_its_own_blocks(client, jansen_blocks):
+    today = {s["key"]: s for s in client.get("/api/fruit-sources").json()[0]["sources"]}
+    # Received blocks say whose they are; the farm's own stay as they were.
+    assert (today["block:J1"]["owner_id"], today["block:J1"]["owner_name"], today["block:J1"]["crates"]) == (2, "Jansen Boerdery", 2)
+    assert "owner_id" not in today["block:15"] and today["supplier:2"]["crates"] == 40
+    by = {s["id"]: [b["block_id"] for b in s["blocks"]] for s in client.get("/api/suppliers").json()}
+    assert by[2] == ["J1", "J2"] and "15" in by[1] and "J1" not in by[1]  # the retired J3 is not offered
+
+
+def test_without_block_suppliers_in_boord_every_block_is_the_farms_own(client):
+    by = {s["id"]: [b["block_id"] for b in s["blocks"]] for s in client.get("/api/suppliers").json()}
+    assert by == {1: ["15", "7", "8a", "9"], 2: []}

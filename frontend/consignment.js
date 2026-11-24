@@ -304,12 +304,22 @@ function packChoices(d) {
 
 // The blocks in the fruit received today and the last earlier receiving day
 // (the sulfur screen's list, Store.sources()), plus the pallet's own blocks
-// that have since dropped off it. Bought-in fruit has no block: it is the
-// pallet's supplier.
+// that have since dropped off it. Only the blocks of the pallet's supplier: a
+// received block is its lot's supplier's (owner_id; none is the farm's own).
+// Another supplier's fruit mostly comes in at receiving without picking
+// slips, so there is nothing received to read its blocks from: all of that
+// supplier's blocks in Boord (Master Data -> Blocks) are offered after them.
 function blockGroups(d) {
-  const groups = Store.sources().map((g) => ({ label: g.label, blocks: g.sources.filter((s) => s.block_id != null) }))
+  const own = (ownSupplier() || { id: null }).id;
+  const theirs = (s) => s.block_id != null && (s.owner_id == null ? own : s.owner_id) === d.supplier_id;
+  const groups = Store.sources().map((g) => ({ label: g.label, blocks: g.sources.filter(theirs) }))
     .filter((g) => g.blocks.length);
   const listed = (id) => groups.some((g) => g.blocks.some((b) => b.block_id === id));
+  const supplier = Store.suppliers().find((s) => s.id === d.supplier_id);
+  if (supplier && !supplier.is_own_farm) {
+    const rest = (supplier.blocks || []).filter((b) => !listed(b.block_id));
+    if (rest.length) groups.push({ label: `${supplier.name}'s blocks`, blocks: rest });
+  }
   const earlier = (d.pallet ? d.pallet.lines : []).filter((l) => l.block_id && !listed(l.block_id))
     .map((l) => ({ block_id: l.block_id, block_name: l.block_name, variety: l.variety }));
   if (earlier.length) groups.push({ label: "Earlier", blocks: earlier });
