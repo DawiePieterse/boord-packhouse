@@ -75,11 +75,18 @@ function supplierPicked(ev) {
 // The pallet number is typed once and then runs on: 001, 002... (or from 100).
 // Unique for the season (the calendar year it was scanned in) across every
 // stack, among the supplier's own pallets: each supplier's are numbered apart.
+// The offer follows the last pallet added, not the highest number, so one
+// typed out of the run (803) doesn't drag the series along; a number already
+// taken is stepped over.
 const seasonOf = (iso) => new Date(iso).getFullYear();
 const seasonPallets = (season) => Store.pallets().filter((p) => mine(p) && seasonOf(p.scanned_at) === season);
 function nextRef() {
-  const used = seasonPallets(seasonOf(nowIso())).map((p) => Number(p.pallet_ref)).filter((n) => n >= 1);
-  return String(Math.min(999, (used.length ? Math.max(...used) : 0) + 1)).padStart(3, "0");
+  const ps = seasonPallets(seasonOf(nowIso())).filter((p) => Number(p.pallet_ref) >= 1);
+  const used = new Set(ps.map((p) => Number(p.pallet_ref)));
+  const last = ps.reduce((a, p) => (!a || p.scanned_at > a.scanned_at ? p : a), null);
+  let n = last ? Number(last.pallet_ref) + 1 : 1;
+  while (used.has(n) && n < 999) n++;
+  return String(Math.min(999, n)).padStart(3, "0");
 }
 const nowIso = () => new Date(Store.now()).toISOString();
 const sum = (rows, f) => rows.reduce((n, r) => n + f(r), 0);
